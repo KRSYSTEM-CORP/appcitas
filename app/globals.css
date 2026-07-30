@@ -32,13 +32,13 @@
   --radius-xl: calc(var(--radius) * 1.4);
 }
 
-/* App default: warm blush background, berry-rose primary — a palette
-   grounded in the beauty/wellness booking domain (salons, spas, clínicas
-   estéticas) rather than a generic blue SaaS look. A business's own chosen
-   background/accent overrides these via lib/theme-color.ts's
-   deriveBrandVars(): applied as an inline style on <html> for its signed-in
-   users (app/layout.tsx) and live on the login screen once the business is
-   identified by email or business code (components/auth/LoginForm.tsx). */
+/* App default: warm blush background, brand indigo primary (sampled from the
+   KR System logo's blue-to-pink gradient, shared across the whole KR System
+   product family). A business's own chosen background/accent overrides these
+   via lib/theme-color.ts's deriveBrandVars(): applied as an inline style on
+   <html> for its signed-in users (app/layout.tsx) and live on the login
+   screen once the business is identified by email or business code
+   (components/auth/LoginForm.tsx). */
 :root {
   --background: #fbf6f4;
   --foreground: #241a20;
@@ -46,14 +46,14 @@
   --card-foreground: #241a20;
   --popover: #ffffff;
   --popover-foreground: #241a20;
-  --primary: #a8355a;
+  --primary: #4f3ddb;
   --primary-foreground: #ffffff;
-  --secondary: #f1e4e8;
-  --secondary-foreground: #7a2c46;
+  --secondary: #eeecfb;
+  --secondary-foreground: #3b2e8c;
   --muted: #f3edea;
   --muted-foreground: #7a6b70;
-  --accent: #ece0e3;
-  --accent-foreground: #241a20;
+  --accent: #eeecfb;
+  --accent-foreground: #3b2e8c;
   --destructive: #c43d3d;
   --success: #1f7a4d;
   --success-foreground: #ffffff;
@@ -61,7 +61,7 @@
   --warning-foreground: #ffffff;
   --border: #e7d9dc;
   --input: #e7d9dc;
-  --ring: #a8355a;
+  --ring: #4f3ddb;
   --radius: 0.75rem;
 }
 
@@ -72,14 +72,14 @@
   --card-foreground: #f3ece7;
   --popover: #221a1f;
   --popover-foreground: #f3ece7;
-  --primary: #e36f8f;
+  --primary: #8f7ef5;
   --primary-foreground: #1a1418;
-  --secondary: #33232b;
-  --secondary-foreground: #f3ece7;
+  --secondary: #2c2740;
+  --secondary-foreground: #e4defb;
   --muted: #2b2126;
   --muted-foreground: #b5a7af;
-  --accent: #33232b;
-  --accent-foreground: #f3ece7;
+  --accent: #2c2740;
+  --accent-foreground: #e4defb;
   --destructive: #e5716b;
   --success: #4fbd86;
   --success-foreground: #1a1418;
@@ -87,7 +87,7 @@
   --warning-foreground: #1a1418;
   --border: #3a2b32;
   --input: #3a2b32;
-  --ring: #e36f8f;
+  --ring: #8f7ef5;
 }
 
 @layer base {

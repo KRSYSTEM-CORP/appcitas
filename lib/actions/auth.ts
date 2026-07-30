@@ -1,13 +1,25 @@
 "use server";
 
-import { randomInt } from "crypto";
+import { randomInt, randomBytes, createHash } from "crypto";
 import { redirect } from "next/navigation";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { hashPassword, verifyPassword } from "@/lib/password";
 import { setSessionCookie, clearSessionCookie } from "@/lib/session";
-import { LoginSchema, SignupSchema } from "@/lib/validations";
+import { sendPasswordResetEmail } from "@/lib/email";
+import {
+  LoginSchema,
+  RequestPasswordResetSchema,
+  ResetPasswordSchema,
+  SignupSchema,
+} from "@/lib/validations";
 import type { ActionResult } from "@/lib/types";
+
+const RESET_TOKEN_TTL_MS = 60 * 60 * 1000;
+
+function hashResetToken(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
 
 // Excludes visually ambiguous characters (0/O, 1/I) since staff will be
 // reading this off a screen or a note to type it in themselves.
@@ -142,6 +154,61 @@ export async function login(formData: FormData): Promise<ActionResult> {
 export async function logout(): Promise<void> {
   await clearSessionCookie();
   redirect("/login");
+}
+
+// Always returns success regardless of whether the email is registered, so
+// this form can't be used to discover which emails have accounts.
+export async function requestPasswordReset(formData: FormData): Promise<ActionResult> {
+  const parsed = RequestPasswordResetSchema.safeParse({ email: formData.get("email") });
+  if (!parsed.success) {
+    return { success: false, error: parsed.error.issues[0]?.message ?? "Datos inválidos" };
+  }
+
+  const user = await prisma.user.findUnique({ where: { email: parsed.data.email } });
+  if (user) {
+    const rawToken = randomBytes(32).toString("hex");
+    await prisma.passwordResetToken.create({
+      data: {
+        userId: user.id,
+        tokenHash: hashResetToken(rawToken),
+        expiresAt: new Date(Date.now() + RESET_TOKEN_TTL_MS),
+      },
+    });
+    await sendPasswordResetEmail(parsed.data.email, rawToken);
+  }
+
+  return { success: true };
+}
+
+export async function resetPassword(token: string, formData: FormData): Promise<ActionResult> {
+  const parsed = ResetPasswordSchema.safeParse({
+    password: formData.get("password"),
+    confirmPassword: formData.get("confirmPassword"),
+  });
+  if (!parsed.success) {
+    return { success: false, error: parsed.error.issues[0]?.message ?? "Datos inválidos" };
+  }
+
+  const genericError = "Este enlace no es válido o ya venció. Solicita uno nuevo.";
+  const resetToken = await prisma.passwordResetToken.findUnique({
+    where: { tokenHash: hashResetToken(token) },
+  });
+  if (!resetToken || resetToken.usedAt || resetToken.expiresAt < new Date()) {
+    return { success: false, error: genericError };
+  }
+
+  await prisma.$transaction([
+    prisma.user.update({
+      where: { id: resetToken.userId },
+      data: { passwordHash: hashPassword(parsed.data.password) },
+    }),
+    prisma.passwordResetToken.update({
+      where: { id: resetToken.id },
+      data: { usedAt: new Date() },
+    }),
+  ]);
+
+  return { success: true };
 }
 
 export type BusinessBranding = {

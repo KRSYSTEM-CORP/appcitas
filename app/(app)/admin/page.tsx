@@ -1,9 +1,13 @@
 import { StatCard } from "@/components/reports/StatCard";
 import { AdminBusinessTable } from "@/components/admin/AdminBusinessTable";
-import { listBusinessesForAdmin } from "@/lib/actions/admin";
+import { AnnouncementForm } from "@/components/admin/AnnouncementForm";
+import { listBusinessesForAdmin, listAnnouncementRecipients } from "@/lib/actions/admin";
 
 export default async function AdminPage() {
-  const businesses = await listBusinessesForAdmin();
+  const [businesses, announcementRecipients] = await Promise.all([
+    listBusinessesForAdmin(),
+    listAnnouncementRecipients(),
+  ]);
   const pending = businesses.filter((b) => b.ownerStatus === "PENDING").length;
   const active = businesses.filter((b) => b.ownerStatus === "ACTIVE").length;
   const suspended = businesses.filter((b) => b.ownerStatus === "SUSPENDED").length;
@@ -24,6 +28,8 @@ export default async function AdminPage() {
       </div>
 
       <AdminBusinessTable businesses={businesses} />
+
+      <AnnouncementForm recipientCount={announcementRecipients.length} />
     </div>
   );
 }

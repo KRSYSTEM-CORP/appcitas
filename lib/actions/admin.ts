@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireSuperAdmin } from "@/lib/session";
+import { sendAnnouncementEmail } from "@/lib/email";
+import { AnnouncementSchema } from "@/lib/validations";
 import type { ActionResult } from "@/lib/types";
 
 export type AdminBusinessRow = {
@@ -37,6 +39,45 @@ export async function listBusinessesForAdmin(): Promise<AdminBusinessRow[]> {
       ownerEmail: b.users[0].email ?? "—",
       ownerStatus: b.users[0].status,
     }));
+}
+
+// One row per business owner (real email, not the specialist/staff logins
+// which have no email at all — see User.email being optional in schema.prisma).
+export async function listAnnouncementRecipients(): Promise<{ email: string; businessName: string }[]> {
+  await requireSuperAdmin();
+  const owners = await prisma.user.findMany({
+    where: { role: "OWNER", status: "ACTIVE", email: { not: null } },
+    select: { email: true, business: { select: { name: true } } },
+  });
+  return owners.map((o) => ({ email: o.email as string, businessName: o.business.name }));
+}
+
+export type SendAnnouncementResult =
+  | { success: true; sent: number; total: number }
+  | { success: false; error: string };
+
+// Sends the same announcement to every active business's owner — used for
+// product news/updates, not scoped to any one tenant. Individual send
+// failures don't fail the whole batch (Promise.allSettled): the admin sees
+// how many of the total actually went out.
+export async function sendAnnouncement(input: unknown): Promise<SendAnnouncementResult> {
+  await requireSuperAdmin();
+  const parsed = AnnouncementSchema.safeParse(input);
+  if (!parsed.success) {
+    return { success: false, error: parsed.error.issues[0]?.message ?? "Datos inválidos" };
+  }
+
+  const recipients = await listAnnouncementRecipients();
+  if (recipients.length === 0) {
+    return { success: false, error: "No hay negocios activos para notificar" };
+  }
+
+  const results = await Promise.allSettled(
+    recipients.map((r) => sendAnnouncementEmail(r.email, parsed.data.subject, parsed.data.message))
+  );
+  const sent = results.filter((r) => r.status === "fulfilled" && r.value).length;
+
+  return { success: true, sent, total: recipients.length };
 }
 
 export async function approveBusiness(userId: string): Promise<ActionResult> {

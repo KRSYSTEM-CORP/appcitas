@@ -1,0 +1,348 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// PENDING is only ever the state of the OWNER account created at signup,
+// awaiting a super admin's approval (see requireSuperAdmin in lib/session.ts)
+// before the business can log in at all. Specialists an owner creates start
+// ACTIVE directly — the gate is per-business, not per-login.
+enum UserStatus {
+  PENDING
+  ACTIVE
+  SUSPENDED
+}
+
+// OWNER manages the business (branding, hours, catalog, staff). SPECIALIST is
+// staff with their own agenda — may or may not have login access (see
+// Specialist.userId being optional).
+enum Role {
+  OWNER
+  SPECIALIST
+}
+
+enum AppointmentStatus {
+  PENDING
+  CONFIRMED
+  ATTENDED
+  NO_SHOW
+  CANCELLED
+}
+
+enum PaymentMethod {
+  CASH
+  TRANSFER
+  CARD
+  PAGO_MOVIL
+  BINANCE
+  OTHER
+}
+
+enum NotificationChannel {
+  WHATSAPP
+  SMS
+  PUSH
+}
+
+enum NotificationStatus {
+  SCHEDULED
+  SENT
+  FAILED
+}
+
+// PACKAGE: one payment covers every session up front (typical for a
+// prepaid physio/beauty package). PER_SESSION: the client pays as each
+// session is attended, same as a plain one-off appointment.
+enum PackagePaymentMode {
+  PACKAGE
+  PER_SESSION
+}
+
+// A registered business (salon, consultorio, etc.) — the tenant boundary.
+// Every other model hangs off businessId either directly or transitively.
+model Business {
+  id                String   @id @default(cuid())
+  name              String
+  // Public booking page lives at {subdomain}.<platform-domain>.
+  subdomain         String   @unique
+  // Short code staff type in alongside their name+password to log in without
+  // an email — mirrors KYRA System's employee login.
+  loginCode         String   @unique
+  logoDataUrl       String?
+  brandColor        String?
+  brandBackground   String?
+  timezone          String   @default("America/Caracas")
+  localCurrencyCode String   @default("VES")
+  // Whether this business quotes/reports a secondary (foreign) currency
+  // alongside localCurrencyCode, using the rate fields below.
+  fxEnabled           Boolean  @default(false)
+  foreignCurrencyCode String   @default("USD")
+  // Local-currency units per 1 foreignCurrencyCode unit — mirrors
+  // Company.exchangeRate/exchangeRateUpdatedAt in the ventas-inventario app
+  // (single current value + timestamp, not a history log; every Transaction
+  // still snapshots its own fxRate, so historical documents are unaffected
+  // by later rate changes).
+  exchangeRate          Decimal?  @db.Decimal(18, 6)
+  exchangeRateUpdatedAt DateTime?
+  createdAt         DateTime @default(now())
+
+  users         User[]
+  specialists   Specialist[]
+  services      Service[]
+  clients       Client[]
+  appointments  Appointment[]
+  packages      SessionPackage[]
+  businessHours BusinessHour[]
+}
+
+// Weekly recurring hours. One row per weekday (0=domingo .. 6=sábado);
+// isClosed overrides opensAt/closesAt for days the business doesn't operate.
+model BusinessHour {
+  id         String   @id @default(cuid())
+  businessId String
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  weekday    Int
+  opensAt    String?
+  closesAt   String?
+  isClosed   Boolean  @default(false)
+
+  @@unique([businessId, weekday])
+}
+
+// A login — the owner (created at signup) or a specialist with staff access.
+model User {
+  id           String     @id @default(cuid())
+  businessId   String
+  business     Business   @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  // Only owners log in by email; specialists log in with loginCode+name
+  // (see loginEmployee-style flow), so this stays optional and unique.
+  email        String?    @unique
+  firstName    String
+  lastName     String
+  passwordHash String
+  role         Role       @default(OWNER)
+  status       UserStatus @default(ACTIVE)
+  // Platform-level administrator (not tied to any one business) — can
+  // approve/deny/suspend any business's access from /admin. Not settable
+  // from the app itself; only ever changed directly in the database.
+  isSuperAdmin Boolean    @default(false)
+  createdAt    DateTime   @default(now())
+
+  specialist Specialist?
+
+  @@index([businessId])
+}
+
+model Specialist {
+  id            String   @id @default(cuid())
+  businessId    String
+  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  userId        String?  @unique
+  user          User?    @relation(fields: [userId], references: [id])
+  displayName   String
+  bio           String?
+  avatarDataUrl String?
+  active        Boolean  @default(true)
+  createdAt     DateTime @default(now())
+
+  services     SpecialistService[]
+  appointments Appointment[]
+  packages     SessionPackage[]
+
+  @@index([businessId])
+}
+
+model Service {
+  id              String   @id @default(cuid())
+  businessId      String
+  business        Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  name            String
+  description     String?
+  durationMinutes Int
+  basePriceCents  Int
+  // The currency basePriceCents is actually denominated in — captured at
+  // save time so a service's price keeps its real-world meaning even if the
+  // business later flips fxEnabled or switches its reference currency.
+  // Local-currency display elsewhere converts via the latest ExchangeRate
+  // when this differs from Business.localCurrencyCode.
+  priceCurrencyCode String @default("USD")
+  category        String?
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  // When true, availability for this service is driven by ServiceHour
+  // instead of the business's default BusinessHour (see getAvailableSlots).
+  hasCustomHours  Boolean  @default(false)
+
+  specialists  SpecialistService[]
+  appointments Appointment[]
+  packages     SessionPackage[]
+  hours        ServiceHour[]
+
+  @@index([businessId])
+}
+
+// Which specialists can perform which services — a specialist's booking
+// options are the intersection of this table, not every service a business
+// offers.
+model SpecialistService {
+  specialistId String
+  specialist   Specialist @relation(fields: [specialistId], references: [id], onDelete: Cascade)
+  serviceId    String
+  service      Service    @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@id([specialistId, serviceId])
+}
+
+// Weekly recurring hours scoped to one service — same shape as BusinessHour,
+// only consulted when Service.hasCustomHours is true (see getAvailableSlots
+// in lib/actions/public.ts). Replaces BusinessHour entirely for that service
+// on the days it applies, rather than intersecting with it.
+model ServiceHour {
+  id        String  @id @default(cuid())
+  serviceId String
+  service   Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  weekday   Int
+  opensAt   String?
+  closesAt  String?
+  isClosed  Boolean @default(false)
+
+  @@unique([serviceId, weekday])
+}
+
+model Client {
+  id         String   @id @default(cuid())
+  businessId String
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  firstName  String
+  lastName   String
+  phone      String
+  email      String?
+  notes      String?
+  createdAt  DateTime @default(now())
+  // "Eliminar cliente" is a soft delete (row stays, just hidden from lists
+  // and pickers) rather than a real delete — Appointment/Transaction rows
+  // keep pointing at a real Client row, so revenue/attendance reports never
+  // change just because a client got "deleted".
+  active     Boolean  @default(true)
+
+  appointments Appointment[]
+  packages     SessionPackage[]
+
+  @@unique([businessId, phone])
+}
+
+// A prepaid or tracked set of sessions for the same client+service — e.g. 6
+// physiotherapy sessions or a 4-session facial package. Each session is its
+// own Appointment (own date/time, own attendance status), linked back here
+// via Appointment.packageId; only the payment is optionally handled at this
+// level instead of per session (see paymentMode).
+// Named SessionPackage (not Package) because "package" is a JS strict-mode
+// reserved word — Prisma silently omits any model/field named exactly
+// "package" from the generated client. @@map keeps the actual DB table name
+// as "Package" (set by the packages_and_cancel_token migration).
+model SessionPackage {
+  id                       String             @id @default(cuid())
+  businessId               String
+  business                 Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  clientId                 String
+  client                   Client             @relation(fields: [clientId], references: [id])
+  specialistId             String
+  specialist               Specialist         @relation(fields: [specialistId], references: [id])
+  serviceId                String
+  service                  Service            @relation(fields: [serviceId], references: [id])
+  totalSessions            Int
+  paymentMode              PackagePaymentMode @default(PER_SESSION)
+  // Only set when paymentMode = PACKAGE — the total price for every session
+  // combined (may differ from service.basePriceCents * totalSessions if the
+  // business discounts packages).
+  packagePriceCents        Int?
+  packagePriceCurrencyCode String?
+  createdAt                DateTime           @default(now())
+
+  appointments Appointment[]
+  transactions Transaction[]
+
+  @@index([businessId])
+  @@map("Package")
+}
+
+model Appointment {
+  id           String            @id @default(cuid())
+  businessId   String
+  business     Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  clientId     String
+  client       Client            @relation(fields: [clientId], references: [id])
+  specialistId String
+  specialist   Specialist        @relation(fields: [specialistId], references: [id])
+  serviceId    String
+  service      Service           @relation(fields: [serviceId], references: [id])
+  startsAt     DateTime
+  endsAt       DateTime
+  status       AppointmentStatus @default(PENDING)
+  notes        String?
+  // Set when this session belongs to a SessionPackage — sessionNumber is its
+  // 1-based position (e.g. 2 of 6) purely for display.
+  packageId      String?
+  sessionPackage SessionPackage? @relation(fields: [packageId], references: [id], onDelete: SetNull)
+  sessionNumber  Int?
+  // Lets a client cancel their own appointment from a link (no login) — see
+  // app/cancel/[token]. Never regenerated, so an old link always keeps
+  // working (or correctly reports "ya fue cancelada" once used).
+  cancelToken  String            @unique @default(cuid())
+  createdAt    DateTime          @default(now())
+
+  transactions  Transaction[]
+  notifications Notification[]
+
+  @@index([businessId, startsAt])
+  @@index([specialistId, startsAt])
+  @@index([packageId])
+}
+
+// One row per payment received — normally against a single Appointment, but
+// when a Package is paid as a whole (paymentMode = PACKAGE) the payment is
+// recorded against the Package instead (exactly one of appointmentId/
+// packageId is set). A target can be paid across several methods (e.g. half
+// cash, half Pago Móvil), so this is intentionally a list rather than a
+// single record — "fully paid" is derived by summing these, not stored.
+model Transaction {
+  id                 String        @id @default(cuid())
+  appointmentId      String?
+  appointment        Appointment?    @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  packageId          String?
+  sessionPackage     SessionPackage? @relation(fields: [packageId], references: [id], onDelete: Cascade)
+  amountLocalCents   Int
+  amountForeignCents Int?
+  // Which currency the user actually typed the amount into — the other
+  // amount column is derived from this one via fxRate. Lets a single
+  // appointment be paid partly in cash USD and partly in VES Pago Móvil and
+  // have each line display its own real currency instead of always showing
+  // the local-currency equivalent first (see components/agenda/AppointmentCard).
+  paidCurrencyCode   String
+  currencyLocal      String
+  currencyForeign    String?
+  fxRate             Decimal?      @db.Decimal(18, 6)
+  paymentMethod      PaymentMethod
+  // Confirmation/reference number for methods that need one (transferencia,
+  // pago móvil, tarjeta, binance) — see PAYMENT_METHODS_REQUIRING_REFERENCE.
+  reference          String?
+  paidAt             DateTime      @default(now())
+
+  @@index([appointmentId])
+  @@index([packageId])
+}
+
+model Notification {
+  id            String              @id @default(cuid())
+  appointmentId String
+  appointment   Appointment         @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  channel       NotificationChannel
+  status        NotificationStatus  @default(SCHEDULED)
+  scheduledAt   DateTime
+  sentAt        DateTime?
+
+  @@index([appointmentId])
+}

@@ -1,0 +1,103 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-jakarta), ui-sans-serif, system-ui, sans-serif;
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+}
+
+/* App default: warm blush background, berry-rose primary — a palette
+   grounded in the beauty/wellness booking domain (salons, spas, clínicas
+   estéticas) rather than a generic blue SaaS look. A business's own chosen
+   background/accent overrides these via lib/theme-color.ts's
+   deriveBrandVars(): applied as an inline style on <html> for its signed-in
+   users (app/layout.tsx) and live on the login screen once the business is
+   identified by email or business code (components/auth/LoginForm.tsx). */
+:root {
+  --background: #fbf6f4;
+  --foreground: #241a20;
+  --card: #ffffff;
+  --card-foreground: #241a20;
+  --popover: #ffffff;
+  --popover-foreground: #241a20;
+  --primary: #a8355a;
+  --primary-foreground: #ffffff;
+  --secondary: #f1e4e8;
+  --secondary-foreground: #7a2c46;
+  --muted: #f3edea;
+  --muted-foreground: #7a6b70;
+  --accent: #ece0e3;
+  --accent-foreground: #241a20;
+  --destructive: #c43d3d;
+  --success: #1f7a4d;
+  --success-foreground: #ffffff;
+  --warning: #b8790f;
+  --warning-foreground: #ffffff;
+  --border: #e7d9dc;
+  --input: #e7d9dc;
+  --ring: #a8355a;
+  --radius: 0.75rem;
+}
+
+.dark {
+  --background: #1a1418;
+  --foreground: #f3ece7;
+  --card: #221a1f;
+  --card-foreground: #f3ece7;
+  --popover: #221a1f;
+  --popover-foreground: #f3ece7;
+  --primary: #e36f8f;
+  --primary-foreground: #1a1418;
+  --secondary: #33232b;
+  --secondary-foreground: #f3ece7;
+  --muted: #2b2126;
+  --muted-foreground: #b5a7af;
+  --accent: #33232b;
+  --accent-foreground: #f3ece7;
+  --destructive: #e5716b;
+  --success: #4fbd86;
+  --success-foreground: #1a1418;
+  --warning: #d9a441;
+  --warning-foreground: #1a1418;
+  --border: #3a2b32;
+  --input: #3a2b32;
+  --ring: #e36f8f;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
+  }
+}

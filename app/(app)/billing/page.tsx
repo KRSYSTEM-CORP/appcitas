@@ -1,5 +1,4 @@
 import { PaymentReportForm } from "@/components/billing/PaymentReportForm";
-import { BinancePayCheckout } from "@/components/billing/BinancePayCheckout";
 import { PagoMovilCheckout } from "@/components/billing/PagoMovilCheckout";
 import { getBillingInfo, listMyPaymentReports } from "@/lib/actions/billing";
 import { formatDate, formatMoney, PAYMENT_METHOD_LABELS } from "@/lib/format";
@@ -95,7 +94,7 @@ export default async function BillingPage() {
       )}
 
       {!info.isExempt && (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="rounded-md border border-border bg-card p-4 flex flex-col gap-3">
             <h2 className="text-sm font-semibold">Pago Móvil automático</h2>
             <p className="text-sm text-muted-foreground">
@@ -103,15 +102,6 @@ export default async function BillingPage() {
               necesitas esperar a que nadie apruebe nada.
             </p>
             <PagoMovilCheckout paymentInstructions={info.paymentInstructions} />
-          </div>
-
-          <div className="rounded-md border border-border bg-card p-4 flex flex-col gap-3">
-            <h2 className="text-sm font-semibold">Pago automático con Binance</h2>
-            <p className="text-sm text-muted-foreground">
-              Paga con Binance Pay y tu suscripción se renueva sola — no necesitas esperar a que
-              nadie apruebe nada.
-            </p>
-            <BinancePayCheckout monthlyFeeUsdCents={info.monthlyFeeUsdCents} />
           </div>
 
           <div className="rounded-md border border-border bg-card p-4 flex flex-col gap-3">

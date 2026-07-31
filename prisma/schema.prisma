@@ -74,6 +74,12 @@ enum BinancePayOrderStatus {
   FAILED
 }
 
+enum PagoMovilOrderStatus {
+  PENDING
+  PAID
+  EXPIRED
+}
+
 // A registered business (salon, consultorio, etc.) — the tenant boundary.
 // Every other model hangs off businessId either directly or transitively.
 model Business {
@@ -120,6 +126,7 @@ model Business {
   payments         Payment[]
   paymentReports   PaymentReport[]
   binancePayOrders BinancePayOrder[]
+  pagoMovilOrders  PagoMovilOrder[]
 }
 
 // Weekly recurring hours. One row per weekday (0=domingo .. 6=sábado);
@@ -389,7 +396,7 @@ model Notification {
 }
 
 // Each payment extends Business.nextPaymentDueDate to `periodEnd`. Mirrors
-// Payment in the App Finanzas schema — see lib/billing.ts.
+// Payment in the KR POS schema — see lib/billing.ts.
 model Payment {
   id             String   @id @default(cuid())
   businessId     String
@@ -468,6 +475,40 @@ model BinancePayOrder {
   paidAt          DateTime?
 
   @@index([businessId, status])
+}
+
+// An expected Pago Móvil (Banesco) payment for a business's maintenance-fee
+// cycle — same idea as BinancePayOrder, but there's no merchant API to
+// create/confirm a Pago Móvil transfer, so the "order" is really a
+// reservation of a specific Bs amount the business is asked to transfer.
+// expectedAmountBsCents gets a few random bolívar-cents added on top of the
+// real fee (see createPagoMovilOrder in lib/actions/billing.ts) so a
+// forwarded bank notification email can be matched back to exactly one
+// pending order by amount alone — Pago Móvil references aren't something we
+// can pre-assign the way merchantTradeNo works for Binance. See
+// app/api/webhooks/banesco-email/route.ts for the other half: parsing the
+// forwarded notification email and marking the matching order PAID.
+model PagoMovilOrder {
+  id                    String               @id @default(cuid())
+  businessId            String
+  business              Business             @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  amountUsdCents        Int
+  // Platform Bs/USD rate used to compute expectedAmountBsCents — snapshotted
+  // here so the Payment record created on confirmation uses the exact rate
+  // that was quoted, even if the platform rate changes before the transfer
+  // actually arrives.
+  exchangeRate          Decimal              @db.Decimal(12, 4)
+  expectedAmountBsCents Int
+  status                PagoMovilOrderStatus @default(PENDING)
+  // Pending orders older than this stop being eligible to match an incoming
+  // email — without an expiry, a stale unpaid reservation could collide
+  // with a brand-new one asking for the same bumped amount.
+  expiresAt             DateTime
+  createdAt             DateTime             @default(now())
+  paidAt                DateTime?
+
+  @@index([businessId, status])
+  @@index([expectedAmountBsCents, status])
 }
 
 // Single global row of platform-wide config, managed by the super admin.

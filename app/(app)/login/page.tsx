@@ -15,7 +15,7 @@ export default function LoginPage() {
           </div>
           <div>
             <h1 className="text-2xl font-semibold">Inicia sesión</h1>
-            <p className="text-sm text-muted-foreground mt-1">App Citas — agenda y reservas</p>
+            <p className="text-sm text-muted-foreground mt-1">KR Citas — agenda y reservas</p>
           </div>
         </div>
         <LoginForm />

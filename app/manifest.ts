@@ -2,9 +2,9 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "App Citas - By KR System",
-    short_name: "App Citas",
-    description: "Agenda y reservas para negocios de servicios — App Citas",
+    name: "KR Citas - By KR System",
+    short_name: "KR Citas",
+    description: "Agenda y reservas para negocios de servicios — KR Citas",
     start_url: "/",
     display: "standalone",
     background_color: "#fbf6f4",

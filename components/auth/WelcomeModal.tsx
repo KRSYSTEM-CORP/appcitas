@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 // Bump the suffix (v1 -> v2) if the content changes enough that returning
 // users should see it again — otherwise this only ever shows once per
 // browser, the first time someone lands on the login screen.
-const DISMISS_KEY = "app-citas-welcome-dismissed-v1";
+const DISMISS_KEY = "kr-citas-welcome-dismissed-v1";
 
 const STEPS = [
   "Crea tu cuenta con el nombre y subdominio de tu negocio.",
@@ -42,7 +42,7 @@ export function WelcomeModal() {
           <XIcon className="size-5" />
         </button>
 
-        <h2 className="text-lg font-semibold mb-2">¿Qué es App Citas?</h2>
+        <h2 className="text-lg font-semibold mb-2">¿Qué es KR Citas?</h2>
         <p className="text-sm text-muted-foreground mb-4">
           Agenda y reservas para negocios de servicios — control de citas, clientes,
           especialistas y pagos, con una página pública de reservas para tu negocio.

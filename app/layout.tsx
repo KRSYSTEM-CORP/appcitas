@@ -8,12 +8,12 @@ const jakarta = Plus_Jakarta_Sans({
 });
 
 export const metadata: Metadata = {
-  title: "App Citas - By KR System",
-  description: "Agenda y reservas para negocios de servicios — App Citas",
+  title: "KR Citas - By KR System",
+  description: "Agenda y reservas para negocios de servicios — KR Citas",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: "App Citas",
+    title: "KR Citas",
   },
 };
 

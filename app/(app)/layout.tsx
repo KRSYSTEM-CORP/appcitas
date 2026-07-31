@@ -6,7 +6,7 @@ import { deriveBrandVars } from "@/lib/theme-color";
 
 export async function generateMetadata(): Promise<Metadata> {
   const session = await getSession();
-  return { title: session ? `${session.businessName} · App Citas` : "App Citas - By KR System" };
+  return { title: session ? `${session.businessName} · KR Citas` : "KR Citas - By KR System" };
 }
 
 export default async function AppLayout({ children }: Readonly<{ children: React.ReactNode }>) {

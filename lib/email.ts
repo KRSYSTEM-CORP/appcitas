@@ -2,8 +2,8 @@ import { Resend } from "resend";
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 
-const FROM = process.env.RESEND_FROM_EMAIL || "App Citas <noreply@krsystem-corp.com>";
-const APP_URL = process.env.APP_URL || "https://appcitas.krsystem-corp.com";
+const FROM = process.env.RESEND_FROM_EMAIL || "KR Citas <noreply@krsystem-corp.com>";
+const APP_URL = process.env.APP_URL || "https://krcitas.krsystem-corp.com";
 
 // Resend is optional in dev — if no API key is configured, reset links are
 // logged to the server console instead of emailed, so the flow is still
@@ -47,7 +47,7 @@ export async function sendAnnouncementEmail(
     `
       <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
         ${bodyHtml}
-        <p style="color: #888; font-size: 12px; margin-top: 32px;">App Citas — By KR System</p>
+        <p style="color: #888; font-size: 12px; margin-top: 32px;">KR Citas — By KR System</p>
       </div>
     `,
   );
@@ -57,18 +57,18 @@ export async function sendPasswordResetEmail(to: string, token: string): Promise
   const resetUrl = `${APP_URL}/reset-password/${token}`;
   await send(
     to,
-    "Recupera tu contraseña — App Citas",
+    "Recupera tu contraseña — KR Citas",
     `
       <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
         <h2>Recupera tu contraseña</h2>
-        <p>Recibimos una solicitud para restablecer la contraseña de tu cuenta en App Citas.</p>
+        <p>Recibimos una solicitud para restablecer la contraseña de tu cuenta en KR Citas.</p>
         <p>
           <a href="${resetUrl}" style="display: inline-block; background: #4f3ddb; color: #fff; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: 600;">
             Crear nueva contraseña
           </a>
         </p>
         <p>Este enlace vence en 1 hora. Si no solicitaste este cambio, puedes ignorar este correo.</p>
-        <p style="color: #888; font-size: 12px; margin-top: 32px;">App Citas — By KR System</p>
+        <p style="color: #888; font-size: 12px; margin-top: 32px;">KR Citas — By KR System</p>
       </div>
     `,
   );

@@ -6,55 +6,12 @@ import { listActiveSpecialists } from "@/lib/actions/specialists";
 import { getFxInfo } from "@/lib/actions/business";
 import { requireSession } from "@/lib/session";
 import { formatDate, formatDayLabel, toDateKey } from "@/lib/format";
+import { RANGE_VIEWS, getRange, shiftDate, type RangeView } from "@/lib/date-range";
 
-type AgendaView = "day" | "week" | "month";
-
-const VIEWS: { key: AgendaView; label: string }[] = [
-  { key: "day", label: "Hoy" },
-  { key: "week", label: "Semana" },
-  { key: "month", label: "Mes" },
-];
+type AgendaView = RangeView;
+const VIEWS = RANGE_VIEWS;
 
 const MONTH_LABEL_FORMATTER = new Intl.DateTimeFormat("es-VE", { month: "long", year: "numeric" });
-
-function addDays(dateKey: string, delta: number): string {
-  const d = new Date(`${dateKey}T00:00:00`);
-  d.setDate(d.getDate() + delta);
-  return toDateKey(d);
-}
-
-function addMonths(dateKey: string, delta: number): string {
-  const d = new Date(`${dateKey}T00:00:00`);
-  d.setMonth(d.getMonth() + delta);
-  return toDateKey(d);
-}
-
-// Sunday-Saturday, matching BusinessHour's weekday numbering (0=domingo).
-function weekStart(dateKey: string): string {
-  const d = new Date(`${dateKey}T00:00:00`);
-  return addDays(dateKey, -d.getDay());
-}
-
-function getRange(view: AgendaView, dateKey: string): { start: Date; end: Date } {
-  if (view === "day") {
-    const start = new Date(`${dateKey}T00:00:00`);
-    return { start, end: new Date(start.getTime() + 24 * 60 * 60_000) };
-  }
-  if (view === "week") {
-    const start = new Date(`${weekStart(dateKey)}T00:00:00`);
-    return { start, end: new Date(start.getTime() + 7 * 24 * 60 * 60_000) };
-  }
-  const d = new Date(`${dateKey}T00:00:00`);
-  const start = new Date(d.getFullYear(), d.getMonth(), 1);
-  const end = new Date(d.getFullYear(), d.getMonth() + 1, 1);
-  return { start, end };
-}
-
-function shiftDate(view: AgendaView, dateKey: string, delta: number): string {
-  if (view === "day") return addDays(dateKey, delta);
-  if (view === "week") return addDays(dateKey, delta * 7);
-  return addMonths(dateKey, delta);
-}
 
 export default async function AgendaPage({
   searchParams,

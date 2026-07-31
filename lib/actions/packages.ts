@@ -45,22 +45,14 @@ export type PackageListItem = {
   transactions: TransactionLine[];
 };
 
-// monthKey is "YYYY-MM"; omit to list every package regardless of when it
-// was created. Filters on Package.createdAt (when the package itself was
-// scheduled), not on any individual session's date.
-export async function listPackages(monthKey?: string): Promise<PackageListItem[]> {
+// range is a [start, end) window over Package.createdAt (when the package
+// itself was scheduled, not any individual session's date); omit to list
+// every package regardless of when it was created.
+export async function listPackages(range?: { start: Date; end: Date }): Promise<PackageListItem[]> {
   const { businessId } = await requireSession();
 
-  let createdAt: { gte: Date; lt: Date } | undefined;
-  if (monthKey && /^\d{4}-\d{2}$/.test(monthKey)) {
-    const [year, month] = monthKey.split("-").map(Number);
-    const start = new Date(year, month - 1, 1);
-    const end = new Date(year, month, 1);
-    createdAt = { gte: start, lt: end };
-  }
-
   const packages = await prisma.sessionPackage.findMany({
-    where: { businessId, ...(createdAt ? { createdAt } : {}) },
+    where: { businessId, ...(range ? { createdAt: { gte: range.start, lt: range.end } } : {}) },
     include: {
       client: { select: { id: true, firstName: true, lastName: true, phone: true } },
       specialist: { select: { id: true, displayName: true } },

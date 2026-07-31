@@ -3,8 +3,9 @@ import { buttonVariants } from "@/components/ui/button";
 import { DeletePackageButton } from "@/components/packages/DeletePackageButton";
 import { listPackages } from "@/lib/actions/packages";
 import { getFxInfo } from "@/lib/actions/business";
-import { formatDate, formatMoney } from "@/lib/format";
+import { formatDate, formatDayLabel, formatMoney, toDateKey } from "@/lib/format";
 import { serviceLocalPriceCents } from "@/lib/pricing";
+import { RANGE_VIEWS, getRange, shiftDate, type RangeView } from "@/lib/date-range";
 
 const PAYMENT_MODE_LABELS = {
   PACKAGE: "Pago único",
@@ -13,22 +14,24 @@ const PAYMENT_MODE_LABELS = {
 
 const MONTH_LABEL_FORMATTER = new Intl.DateTimeFormat("es-VE", { month: "long", year: "numeric" });
 
-function currentMonthKey(): string {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-}
+export default async function PackagesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ date?: string; view?: string }>;
+}) {
+  const { date, view: viewParam } = await searchParams;
+  const dateKey = date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : toDateKey(new Date());
+  const view: RangeView = RANGE_VIEWS.some((v) => v.key === viewParam) ? (viewParam as RangeView) : "month";
 
-function addMonths(monthKey: string, delta: number): string {
-  const [year, month] = monthKey.split("-").map(Number);
-  const d = new Date(year, month - 1 + delta, 1);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-}
+  const { start, end } = getRange(view, dateKey);
+  const [packages, fx] = await Promise.all([listPackages({ start, end }), getFxInfo()]);
 
-export default async function PackagesPage({ searchParams }: { searchParams: Promise<{ month?: string }> }) {
-  const { month } = await searchParams;
-  const monthKey = month && /^\d{4}-\d{2}$/.test(month) ? month : currentMonthKey();
-  const [packages, fx] = await Promise.all([listPackages(monthKey), getFxInfo()]);
-  const monthLabel = MONTH_LABEL_FORMATTER.format(new Date(`${monthKey}-01T00:00:00`));
+  const rangeLabel =
+    view === "day"
+      ? formatDayLabel(new Date(`${dateKey}T00:00:00`))
+      : view === "week"
+        ? `${formatDate(start)} – ${formatDate(new Date(end.getTime() - 24 * 60 * 60_000))}`
+        : MONTH_LABEL_FORMATTER.format(start);
 
   return (
     <div className="flex flex-col gap-4 p-6 max-w-4xl mx-auto w-full">
@@ -44,24 +47,46 @@ export default async function PackagesPage({ searchParams }: { searchParams: Pro
         </Link>
       </div>
 
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div className="flex items-center gap-2">
-          <Link href={`/packages?month=${addMonths(monthKey, -1)}`} className={buttonVariants({ variant: "outline", size: "sm" })}>
+          {RANGE_VIEWS.map((v) => (
+            <Link
+              key={v.key}
+              href={`/packages?view=${v.key}&date=${v.key === "day" ? toDateKey(new Date()) : dateKey}`}
+              className={`rounded-md border px-3 py-1.5 text-sm font-medium transition-colors ${
+                view === v.key ? "bg-primary text-primary-foreground border-primary" : "border-input hover:bg-accent"
+              }`}
+            >
+              {v.label}
+            </Link>
+          ))}
+        </div>
+        <div className="flex items-center gap-2">
+          <Link
+            href={`/packages?view=${view}&date=${shiftDate(view, dateKey, -1)}`}
+            className={buttonVariants({ variant: "outline", size: "sm" })}
+          >
             ← Anterior
           </Link>
-          <Link href={`/packages?month=${currentMonthKey()}`} className={buttonVariants({ variant: "outline", size: "sm" })}>
-            Este mes
+          <Link
+            href={`/packages?view=${view}&date=${toDateKey(new Date())}`}
+            className={buttonVariants({ variant: "outline", size: "sm" })}
+          >
+            Hoy
           </Link>
-          <Link href={`/packages?month=${addMonths(monthKey, 1)}`} className={buttonVariants({ variant: "outline", size: "sm" })}>
+          <Link
+            href={`/packages?view=${view}&date=${shiftDate(view, dateKey, 1)}`}
+            className={buttonVariants({ variant: "outline", size: "sm" })}
+          >
             Siguiente →
           </Link>
         </div>
-        <p className="text-sm font-medium capitalize">{monthLabel}</p>
       </div>
+      <p className="text-sm font-medium capitalize">{rangeLabel}</p>
 
       {packages.length === 0 ? (
         <p className="text-sm text-muted-foreground py-8 text-center border border-dashed border-border rounded-md">
-          Ningún paquete creado en {monthLabel}.
+          Ningún paquete creado en este período.
         </p>
       ) : (
         <div className="flex flex-col gap-2">

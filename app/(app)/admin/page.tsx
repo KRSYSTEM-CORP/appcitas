@@ -1,12 +1,20 @@
 import { StatCard } from "@/components/reports/StatCard";
 import { AdminBusinessTable } from "@/components/admin/AdminBusinessTable";
 import { AnnouncementForm } from "@/components/admin/AnnouncementForm";
-import { listBusinessesForAdmin, listAnnouncementRecipients } from "@/lib/actions/admin";
+import { PlatformSettingsForm, PendingReportsTable } from "@/components/admin/PaymentReportsPanel";
+import {
+  listBusinessesForAdmin,
+  listAnnouncementRecipients,
+  listPendingPaymentReports,
+  getPlatformSettings,
+} from "@/lib/actions/admin";
 
 export default async function AdminPage() {
-  const [businesses, announcementRecipients] = await Promise.all([
+  const [businesses, announcementRecipients, pendingReports, platformSettings] = await Promise.all([
     listBusinessesForAdmin(),
     listAnnouncementRecipients(),
+    listPendingPaymentReports(),
+    getPlatformSettings(),
   ]);
   const pending = businesses.filter((b) => b.ownerStatus === "PENDING").length;
   const active = businesses.filter((b) => b.ownerStatus === "ACTIVE").length;
@@ -25,6 +33,20 @@ export default async function AdminPage() {
         <StatCard label="Pendientes" value={String(pending)} />
         <StatCard label="Activos" value={String(active)} />
         <StatCard label="Suspendidos" value={String(suspended)} />
+      </div>
+
+      <div className="rounded-md border border-border bg-card p-4 flex flex-col gap-3">
+        <h2 className="text-lg font-semibold">Cobro de suscripción mensual</h2>
+        <PlatformSettingsForm
+          initialInstructions={platformSettings.paymentInstructions}
+          initialBillingExchangeRate={platformSettings.billingExchangeRate}
+          initialDefaultMonthlyFeeUsdCents={platformSettings.defaultMonthlyFeeUsdCents}
+        />
+      </div>
+
+      <div className="flex flex-col gap-3">
+        <h2 className="text-lg font-semibold">Reportes de pago pendientes ({pendingReports.length})</h2>
+        <PendingReportsTable reports={pendingReports} />
       </div>
 
       <AdminBusinessTable businesses={businesses} />

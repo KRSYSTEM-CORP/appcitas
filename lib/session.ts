@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import type { Role } from "@prisma/client";
+import { isBusinessBlocked, PLATFORM_SETTINGS_ID } from "@/lib/billing";
 import {
   SESSION_COOKIE_NAME,
   SESSION_MAX_AGE_SECONDS,
@@ -34,6 +35,12 @@ export type Session = {
   businessName: string;
   role: Role;
   isSuperAdmin: boolean;
+  billingBlocked: boolean;
+  isExempt: boolean;
+  monthlyFeeUsdCents: number | null;
+  billingExchangeRate: number | null;
+  localCurrencyCode: string;
+  nextPaymentDueDate: Date | null;
 };
 
 export async function getSession(): Promise<Session | null> {
@@ -47,8 +54,26 @@ export async function getSession(): Promise<Session | null> {
   // Re-validate against the DB on every call so a deleted user/business, or a
   // user suspended by the owner mid-session, is caught immediately instead of
   // trusting a still-valid signed cookie until it expires.
-  const user = await prisma.user.findUnique({ where: { id: payload.uid } });
+  const [user, platformSettings] = await Promise.all([
+    prisma.user.findUnique({
+      where: { id: payload.uid },
+      include: {
+        business: {
+          select: {
+            isExempt: true,
+            monthlyFeeUsdCents: true,
+            nextPaymentDueDate: true,
+            localCurrencyCode: true,
+          },
+        },
+      },
+    }),
+    prisma.platformSettings.findUnique({ where: { id: PLATFORM_SETTINGS_ID } }),
+  ]);
   if (!user || user.businessId !== payload.bid || user.status !== "ACTIVE") return null;
+
+  const isExempt = user.business.isExempt;
+  const nextPaymentDueDate = user.business.nextPaymentDueDate;
 
   return {
     userId: user.id,
@@ -56,12 +81,23 @@ export async function getSession(): Promise<Session | null> {
     businessName: payload.businessName,
     role: user.role,
     isSuperAdmin: user.isSuperAdmin,
+    // A super admin manages billing for every business, so their own access
+    // is never gated by a billing cycle.
+    billingBlocked: user.isSuperAdmin ? false : isBusinessBlocked({ isExempt, nextPaymentDueDate }),
+    isExempt,
+    monthlyFeeUsdCents: user.business.monthlyFeeUsdCents,
+    // Platform-wide rate (not per-business) — see PlatformSettings.
+    billingExchangeRate:
+      platformSettings?.billingExchangeRate != null ? Number(platformSettings.billingExchangeRate) : null,
+    localCurrencyCode: user.business.localCurrencyCode,
+    nextPaymentDueDate,
   };
 }
 
 export async function requireSession(): Promise<Session> {
   const session = await getSession();
   if (!session) redirect("/login");
+  if (session.billingBlocked) redirect("/blocked");
   return session;
 }
 

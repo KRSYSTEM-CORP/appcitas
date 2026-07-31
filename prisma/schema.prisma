@@ -61,25 +61,38 @@ enum PackagePaymentMode {
   PER_SESSION
 }
 
+enum PaymentReportStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum BinancePayOrderStatus {
+  PENDING
+  PAID
+  EXPIRED
+  FAILED
+}
+
 // A registered business (salon, consultorio, etc.) — the tenant boundary.
 // Every other model hangs off businessId either directly or transitively.
 model Business {
-  id                String   @id @default(cuid())
-  name              String
+  id                    String    @id @default(cuid())
+  name                  String
   // Public booking page lives at {subdomain}.<platform-domain>.
-  subdomain         String   @unique
+  subdomain             String    @unique
   // Short code staff type in alongside their name+password to log in without
   // an email — mirrors KYRA System's employee login.
-  loginCode         String   @unique
-  logoDataUrl       String?
-  brandColor        String?
-  brandBackground   String?
-  timezone          String   @default("America/Caracas")
-  localCurrencyCode String   @default("VES")
+  loginCode             String    @unique
+  logoDataUrl           String?
+  brandColor            String?
+  brandBackground       String?
+  timezone              String    @default("America/Caracas")
+  localCurrencyCode     String    @default("VES")
   // Whether this business quotes/reports a secondary (foreign) currency
   // alongside localCurrencyCode, using the rate fields below.
-  fxEnabled           Boolean  @default(false)
-  foreignCurrencyCode String   @default("USD")
+  fxEnabled             Boolean   @default(false)
+  foreignCurrencyCode   String    @default("USD")
   // Local-currency units per 1 foreignCurrencyCode unit — mirrors
   // Company.exchangeRate/exchangeRateUpdatedAt in the ventas-inventario app
   // (single current value + timestamp, not a history log; every Transaction
@@ -87,15 +100,26 @@ model Business {
   // by later rate changes).
   exchangeRate          Decimal?  @db.Decimal(18, 6)
   exchangeRateUpdatedAt DateTime?
-  createdAt         DateTime @default(now())
+  createdAt             DateTime  @default(now())
+  // Maintenance billing, managed by a KR System platform admin from /admin.
+  // Priced in USD — the platform's own billing currency, independent of
+  // this business' local retail currency above. Mirrors Company in the App
+  // Finanzas schema; see lib/billing.ts for the trial/grace/annual-bonus
+  // logic shared by both apps.
+  isExempt              Boolean   @default(false)
+  monthlyFeeUsdCents    Int?
+  nextPaymentDueDate    DateTime?
 
-  users         User[]
-  specialists   Specialist[]
-  services      Service[]
-  clients       Client[]
-  appointments  Appointment[]
-  packages      SessionPackage[]
-  businessHours BusinessHour[]
+  users            User[]
+  specialists      Specialist[]
+  services         Service[]
+  clients          Client[]
+  appointments     Appointment[]
+  packages         SessionPackage[]
+  businessHours    BusinessHour[]
+  payments         Payment[]
+  paymentReports   PaymentReport[]
+  binancePayOrders BinancePayOrder[]
 }
 
 // Weekly recurring hours. One row per weekday (0=domingo .. 6=sábado);
@@ -131,7 +155,7 @@ model User {
   isSuperAdmin Boolean    @default(false)
   createdAt    DateTime   @default(now())
 
-  specialist Specialist?
+  specialist          Specialist?
   passwordResetTokens PasswordResetToken[]
 
   @@index([businessId])
@@ -173,25 +197,25 @@ model Specialist {
 }
 
 model Service {
-  id              String   @id @default(cuid())
-  businessId      String
-  business        Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  name            String
-  description     String?
-  durationMinutes Int
-  basePriceCents  Int
+  id                String   @id @default(cuid())
+  businessId        String
+  business          Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  name              String
+  description       String?
+  durationMinutes   Int
+  basePriceCents    Int
   // The currency basePriceCents is actually denominated in — captured at
   // save time so a service's price keeps its real-world meaning even if the
   // business later flips fxEnabled or switches its reference currency.
   // Local-currency display elsewhere converts via the latest ExchangeRate
   // when this differs from Business.localCurrencyCode.
-  priceCurrencyCode String @default("USD")
-  category        String?
-  active          Boolean  @default(true)
-  createdAt       DateTime @default(now())
+  priceCurrencyCode String   @default("USD")
+  category          String?
+  active            Boolean  @default(true)
+  createdAt         DateTime @default(now())
   // When true, availability for this service is driven by ServiceHour
   // instead of the business's default BusinessHour (see getAvailableSlots).
-  hasCustomHours  Boolean  @default(false)
+  hasCustomHours    Boolean  @default(false)
 
   specialists  SpecialistService[]
   appointments Appointment[]
@@ -287,29 +311,29 @@ model SessionPackage {
 }
 
 model Appointment {
-  id           String            @id @default(cuid())
-  businessId   String
-  business     Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  clientId     String
-  client       Client            @relation(fields: [clientId], references: [id])
-  specialistId String
-  specialist   Specialist        @relation(fields: [specialistId], references: [id])
-  serviceId    String
-  service      Service           @relation(fields: [serviceId], references: [id])
-  startsAt     DateTime
-  endsAt       DateTime
-  status       AppointmentStatus @default(PENDING)
-  notes        String?
+  id             String            @id @default(cuid())
+  businessId     String
+  business       Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  clientId       String
+  client         Client            @relation(fields: [clientId], references: [id])
+  specialistId   String
+  specialist     Specialist        @relation(fields: [specialistId], references: [id])
+  serviceId      String
+  service        Service           @relation(fields: [serviceId], references: [id])
+  startsAt       DateTime
+  endsAt         DateTime
+  status         AppointmentStatus @default(PENDING)
+  notes          String?
   // Set when this session belongs to a SessionPackage — sessionNumber is its
   // 1-based position (e.g. 2 of 6) purely for display.
   packageId      String?
-  sessionPackage SessionPackage? @relation(fields: [packageId], references: [id], onDelete: SetNull)
+  sessionPackage SessionPackage?   @relation(fields: [packageId], references: [id], onDelete: SetNull)
   sessionNumber  Int?
   // Lets a client cancel their own appointment from a link (no login) — see
   // app/cancel/[token]. Never regenerated, so an old link always keeps
   // working (or correctly reports "ya fue cancelada" once used).
-  cancelToken  String            @unique @default(cuid())
-  createdAt    DateTime          @default(now())
+  cancelToken    String            @unique @default(cuid())
+  createdAt      DateTime          @default(now())
 
   transactions  Transaction[]
   notifications Notification[]
@@ -326,7 +350,7 @@ model Appointment {
 // cash, half Pago Móvil), so this is intentionally a list rather than a
 // single record — "fully paid" is derived by summing these, not stored.
 model Transaction {
-  id                 String        @id @default(cuid())
+  id                 String          @id @default(cuid())
   appointmentId      String?
   appointment        Appointment?    @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
   packageId          String?
@@ -341,12 +365,12 @@ model Transaction {
   paidCurrencyCode   String
   currencyLocal      String
   currencyForeign    String?
-  fxRate             Decimal?      @db.Decimal(18, 6)
+  fxRate             Decimal?        @db.Decimal(18, 6)
   paymentMethod      PaymentMethod
   // Confirmation/reference number for methods that need one (transferencia,
   // pago móvil, tarjeta, binance) — see PAYMENT_METHODS_REQUIRING_REFERENCE.
   reference          String?
-  paidAt             DateTime      @default(now())
+  paidAt             DateTime        @default(now())
 
   @@index([appointmentId])
   @@index([packageId])
@@ -362,4 +386,103 @@ model Notification {
   sentAt        DateTime?
 
   @@index([appointmentId])
+}
+
+// Each payment extends Business.nextPaymentDueDate to `periodEnd`. Mirrors
+// Payment in the App Finanzas schema — see lib/billing.ts.
+model Payment {
+  id             String   @id @default(cuid())
+  businessId     String
+  business       Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  amountUsdCents Int
+  // Platform Bs/USD rate in effect for this payment (snapshot, independent
+  // of the business' own retail exchangeRate) — only meaningful for VES
+  // businesses previewing the bolívar equivalent.
+  exchangeRate   Decimal  @db.Decimal(12, 4)
+  periodEnd      DateTime
+  note           String?
+  verifiedById   String
+  createdAt      DateTime @default(now())
+
+  @@index([businessId, createdAt])
+}
+
+// A business owner's self-reported claim of having paid the maintenance fee
+// externally (per the platform's payment instructions). Stays PENDING until
+// a super admin reviews it — approving one creates the matching Payment
+// record and pushes out Business.nextPaymentDueDate; rejecting one leaves
+// billing state untouched.
+model PaymentReport {
+  id                String              @id @default(cuid())
+  businessId        String
+  business          Business            @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  reportedById      String
+  // Proof-of-payment image (base64 data URL), same storage pattern as
+  // Business.logoDataUrl. Required by the submission form, kept nullable
+  // here so a future schema change never needs a backfill.
+  proofImageDataUrl String?             @db.Text
+  note              String?
+  status            PaymentReportStatus @default(PENDING)
+  reviewedById      String?
+  reviewedAt        DateTime?
+  reviewNote        String?
+  createdAt         DateTime            @default(now())
+  lines             PaymentReportLine[]
+
+  @@index([businessId, status])
+  @@index([status, createdAt])
+}
+
+// One payment-method entry in a self-reported maintenance payment (e.g. part
+// transferencia, part Pago Móvil).
+model PaymentReportLine {
+  id              String        @id @default(cuid())
+  paymentReportId String
+  paymentReport   PaymentReport @relation(fields: [paymentReportId], references: [id], onDelete: Cascade)
+  paymentMethod   PaymentMethod
+  amountUsdCents  Int
+  reference       String?
+
+  @@index([paymentReportId])
+}
+
+// A Binance Pay checkout created for a business' maintenance-fee cycle —
+// unlike PaymentReport, this needs no manual admin review: the webhook at
+// app/api/webhooks/binance-pay/route.ts marks it PAID and advances
+// Business.nextPaymentDueDate automatically once Binance confirms funds
+// actually arrived (see lib/binance-pay.ts for the signed request/webhook
+// verification). merchantTradeNo is the idempotency key both directions —
+// Binance echoes it back in the webhook payload, and a retried webhook for
+// an already-PAID order is a no-op.
+model BinancePayOrder {
+  id              String                @id @default(cuid())
+  businessId      String
+  business        Business              @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  merchantTradeNo String                @unique
+  prepayId        String?
+  amountUsdCents  Int
+  status          BinancePayOrderStatus @default(PENDING)
+  checkoutUrl     String?               @db.Text
+  qrcodeLink      String?               @db.Text
+  createdAt       DateTime              @default(now())
+  paidAt          DateTime?
+
+  @@index([businessId, status])
+}
+
+// Single global row of platform-wide config, managed by the super admin.
+// Not scoped by business, so deliberately outside any per-tenant isolation,
+// same as User/Business.
+model PlatformSettings {
+  id                        String   @id
+  paymentInstructions       String?  @db.Text
+  // Platform-wide Bs/USD rate, used only to preview the bolívar equivalent
+  // for VES businesses (who typically pay via Pago Móvil); every other
+  // business just pays the USD amount directly via Binance/transferencia.
+  billingExchangeRate       Decimal? @db.Decimal(12, 4)
+  // Applied to Business.monthlyFeeUsdCents automatically when a super admin
+  // approves a new signup and leaves the fee field blank (see approveBusiness
+  // in lib/actions/admin.ts).
+  defaultMonthlyFeeUsdCents Int?
+  updatedAt                 DateTime @updatedAt
 }

@@ -145,3 +145,68 @@ export const PaymentSchema = z.object({
   paymentMethod: PaymentMethodSchema,
   reference: z.string().trim().optional().or(z.literal("")),
 });
+
+// Platform subscription billing (see lib/billing.ts, lib/actions/billing.ts,
+// lib/actions/admin.ts) — separate from the retail PaymentSchema above,
+// which is for what a business charges ITS OWN clients.
+const toCents = (v: number) => Math.round(v * 100);
+const blankToUndefined = (v: unknown) => (v === "" || v == null ? undefined : v);
+
+export const MaintenancePaymentSchema = z.object({
+  amount: z.coerce.number().positive("El monto debe ser mayor a 0").transform(toCents),
+  periodEnd: z.coerce.date(),
+  note: z.preprocess(blankToUndefined, z.string().trim().optional()),
+});
+
+export type MaintenancePaymentInput = z.infer<typeof MaintenancePaymentSchema>;
+
+const PaymentReportLineSchema = z.object({
+  paymentMethod: PaymentMethodSchema,
+  amount: z.coerce.number().positive("El monto debe ser mayor a 0").transform(toCents),
+  reference: z.preprocess(blankToUndefined, z.string().trim().optional()),
+});
+
+export const PaymentReportSchema = z
+  .object({
+    lines: z.array(PaymentReportLineSchema),
+    proofImageDataUrl: z
+      .string()
+      .trim()
+      .min(1, "El comprobante de pago es obligatorio")
+      .refine((v) => v.startsWith("data:image/"), "Comprobante inválido")
+      .refine((v) => v.length < 3_000_000, "El comprobante es demasiado grande"),
+    note: z.preprocess(blankToUndefined, z.string().trim().optional()),
+  })
+  .superRefine((data, ctx) => {
+    if (data.lines.length === 0) {
+      ctx.addIssue({ code: "custom", path: ["lines"], message: "Agrega al menos un método de pago" });
+      return;
+    }
+    data.lines.forEach((line, i) => {
+      if (
+        (PAYMENT_METHODS_REQUIRING_REFERENCE as readonly string[]).includes(line.paymentMethod) &&
+        !line.reference
+      ) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["lines", i, "reference"],
+          message: "El número de referencia es obligatorio para este método de pago",
+        });
+      }
+    });
+  });
+
+export type PaymentReportInput = z.infer<typeof PaymentReportSchema>;
+
+export const RejectPaymentReportSchema = z.object({
+  reviewNote: z.preprocess(blankToUndefined, z.string().trim().optional()),
+});
+
+export const PlatformSettingsSchema = z.object({
+  paymentInstructions: z.preprocess(blankToUndefined, z.string().trim().optional()),
+  billingExchangeRate: z.coerce.number().positive("La tasa debe ser mayor a 0").optional(),
+  defaultMonthlyFee: z.preprocess(
+    blankToUndefined,
+    z.coerce.number().positive("El monto debe ser mayor a 0").transform(toCents).optional()
+  ),
+});

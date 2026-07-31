@@ -20,6 +20,10 @@ const ownerLinks = [
   { href: "/settings", label: "Configuración" },
 ];
 
+// Always last, regardless of role — visible to a SPECIALIST too since a
+// billing block affects everyone at the business, not just the owner.
+const subscriptionLink = { href: "/billing", label: "Suscripción mensual" };
+
 export function NavBar({
   businessName,
   logoDataUrl,
@@ -38,6 +42,7 @@ export function NavBar({
     ...baseLinks,
     ...(isOwner ? ownerLinks : []),
     ...(isSuperAdmin ? [{ href: "/admin", label: "Admin" }] : []),
+    subscriptionLink,
   ];
 
   // Close the mobile menu automatically whenever the route actually changes

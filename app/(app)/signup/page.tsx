@@ -1,5 +1,6 @@
 import { SignupForm } from "@/components/auth/SignupForm";
 import { SiteFooter } from "@/components/layout/SiteFooter";
+import { WHATSAPP_URL } from "@/lib/legal";
 
 export default function SignupPage() {
   return (
@@ -18,6 +19,17 @@ export default function SignupPage() {
           </div>
         </div>
         <SignupForm />
+        <p className="text-center text-sm text-muted-foreground">
+          ¿Quieres este sistema para tu negocio o más información?{" "}
+          <a
+            href={WHATSAPP_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-medium text-primary hover:underline"
+          >
+            Escríbenos por WhatsApp
+          </a>
+        </p>
       </div>
       <SiteFooter />
     </div>

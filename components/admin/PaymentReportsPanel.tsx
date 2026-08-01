@@ -8,7 +8,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { formatDate, formatMoney, PAYMENT_METHOD_LABELS } from "@/lib/format";
-import { approvePaymentReport, rejectPaymentReport, updatePlatformSettings } from "@/lib/actions/admin";
+import {
+  approvePaymentReport,
+  rejectPaymentReport,
+  updatePlatformSettings,
+  fetchAndUpdatePlatformBcvRate,
+} from "@/lib/actions/admin";
 
 type PendingReportLine = {
   paymentMethod: PaymentMethod;
@@ -44,6 +49,22 @@ export function PlatformSettingsForm({
   );
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const [isFetchingBcv, startBcvFetch] = useTransition();
+  const [bcvError, setBcvError] = useState<string | null>(null);
+
+  function handleFetchBcv() {
+    setBcvError(null);
+    setSaved(false);
+    startBcvFetch(async () => {
+      const result = await fetchAndUpdatePlatformBcvRate();
+      if (!result.success) {
+        setBcvError(result.error);
+        return;
+      }
+      setRate(String(result.rate));
+      router.refresh();
+    });
+  }
 
   function handleSave(e: React.FormEvent) {
     e.preventDefault();
@@ -87,20 +108,33 @@ export function PlatformSettingsForm({
       </div>
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="platform-rate">Tasa de cambio de la plataforma (Bs/USD)</Label>
-        <Input
-          id="platform-rate"
-          type="number"
-          step="0.0001"
-          min="0"
-          value={rate}
-          onChange={(e) => {
-            setRate(e.target.value);
-            setSaved(false);
-          }}
-          placeholder="Ej. 45.0000"
-        />
+        <div className="flex gap-2">
+          <Input
+            id="platform-rate"
+            type="number"
+            step="0.0001"
+            min="0"
+            value={rate}
+            onChange={(e) => {
+              setRate(e.target.value);
+              setSaved(false);
+            }}
+            placeholder="Ej. 45.0000"
+          />
+          <Button
+            type="button"
+            variant="outline"
+            className="shrink-0"
+            onClick={handleFetchBcv}
+            disabled={isFetchingBcv}
+          >
+            {isFetchingBcv ? "Consultando BCV..." : "Actualizar con tasa BCV"}
+          </Button>
+        </div>
+        {bcvError && <p className="text-sm text-destructive">{bcvError}</p>}
         <p className="text-xs text-muted-foreground">
-          Al cambiarla, el monto en bolívares que ve cada negocio se recalcula automáticamente.
+          Se actualiza sola todos los días con la tasa oficial del BCV. Al cambiarla (manual o con
+          el botón), el monto en bolívares que ve cada negocio se recalcula automáticamente.
         </p>
       </div>
       <div className="flex flex-col gap-1.5">

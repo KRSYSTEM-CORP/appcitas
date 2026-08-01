@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireSuperAdmin } from "@/lib/session";
 import { sendAnnouncementEmail } from "@/lib/email";
+import { fetchBcvRate } from "@/lib/bcv-rate";
 import {
   PLATFORM_SETTINGS_ID,
   TRIAL_DAYS,
@@ -383,4 +384,31 @@ export async function updatePlatformSettings(input: unknown): Promise<ActionResu
 
   revalidatePath("/admin");
   return { success: true };
+}
+
+// Same BCV source the per-business "Actualizar con tasa BCV" button uses
+// (lib/actions/business.ts), but for the platform's own USD/VES billing
+// rate — subscriptions are always priced in USD regardless of each
+// business's own reference currency, so this always fetches the USD leg.
+export async function fetchAndUpdatePlatformBcvRate(): Promise<
+  { success: true; rate: number } | { success: false; error: string }
+> {
+  await requireSuperAdmin();
+
+  let rate: number;
+  try {
+    rate = await fetchBcvRate("USD");
+  } catch {
+    return { success: false, error: "No se pudo consultar la tasa del BCV. Intenta de nuevo." };
+  }
+
+  await prisma.platformSettings.upsert({
+    where: { id: PLATFORM_SETTINGS_ID },
+    create: { id: PLATFORM_SETTINGS_ID, billingExchangeRate: rate },
+    update: { billingExchangeRate: rate },
+  });
+
+  revalidatePath("/admin");
+  revalidatePath("/billing");
+  return { success: true, rate };
 }

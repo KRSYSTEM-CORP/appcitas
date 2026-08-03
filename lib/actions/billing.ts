@@ -5,10 +5,8 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
 import { isBusinessBlocked, PLATFORM_SETTINGS_ID } from "@/lib/billing";
-import { createBinancePayOrder } from "@/lib/binance-pay";
 import { PaymentReportSchema } from "@/lib/validations";
 import type { ActionResult } from "@/lib/types";
-import type { BinancePayOrderStatus, PagoMovilOrderStatus } from "@prisma/client";
 
 // This whole file deliberately uses getSession() instead of requireSession():
 // /billing is exactly the page a billing-blocked business needs to reach to
@@ -26,7 +24,8 @@ export type BillingInfo = {
   monthlyFeeUsdCents: number | null;
   // Platform-wide rate (not per-business) — only meaningful for VES
   // businesses previewing what a report would come out to in bolívares
-  // (Pago Móvil); the headline "cost" shown is always the USD amount.
+  // (Transferencia Bancaria / Pago Móvil); the headline "cost" shown is
+  // always the USD amount.
   billingExchangeRate: number | null;
   // The business' own retail currency (Settings → Moneda) — used here just
   // to decide whether the Bs preview above is relevant at all.
@@ -79,7 +78,11 @@ export async function listMyPaymentReports() {
 // A business owner's self-reported claim of having paid the maintenance fee
 // externally, with a required proof-of-payment image. Stays PENDING until a
 // super admin reviews it from /admin — this alone never changes the
-// business' billing state or unblocks it.
+// business' billing state or unblocks it. This is now the ONLY way a payment
+// gets recorded from the business side (no automated checkout of any kind) —
+// the billing page also tells the business to send the same proof to KR
+// System's WhatsApp, which is how the super admin actually finds out to go
+// review it.
 export async function submitPaymentReport(input: unknown): Promise<ActionResult> {
   const { businessId, userId } = await requireBusinessUser();
   const parsed = PaymentReportSchema.safeParse(input);
@@ -105,166 +108,4 @@ export async function submitPaymentReport(input: unknown): Promise<ActionResult>
 
   revalidatePath("/billing");
   return { success: true };
-}
-
-export type BinancePayCheckoutResult =
-  | { success: true; orderId: string; checkoutUrl: string; qrcodeLink: string }
-  | { success: false; error: string };
-
-export type BillingPlan = "MONTHLY" | "ANNUAL";
-
-// Creates a Binance Pay checkout for the business' current maintenance-fee
-// cycle — ANNUAL charges 12× the monthly fee up front; the extra 2 free
-// months from prepaying a full year aren't charged for, they're just extra
-// time credited once the webhook sees this amount (see
-// monthsCoveredWithBonus in lib/billing.ts). Unlike submitPaymentReport,
-// this needs no admin review — once the customer actually pays, Binance
-// calls app/api/webhooks/binance-pay/route.ts, which marks the order PAID
-// and advances nextPaymentDueDate on its own.
-export async function createBinancePayCheckout(plan: BillingPlan = "MONTHLY"): Promise<BinancePayCheckoutResult> {
-  const { businessId } = await requireBusinessUser();
-
-  const business = await prisma.business.findUnique({
-    where: { id: businessId },
-    select: { name: true, monthlyFeeUsdCents: true },
-  });
-  if (!business?.monthlyFeeUsdCents) {
-    return { success: false, error: "Todavía no tienes un ciclo de cobro configurado." };
-  }
-
-  const amountUsdCents = plan === "ANNUAL" ? business.monthlyFeeUsdCents * 12 : business.monthlyFeeUsdCents;
-  const merchantTradeNo = `KRCITAS-${businessId}-${Date.now()}`;
-
-  let order;
-  try {
-    order = await createBinancePayOrder({
-      merchantTradeNo,
-      amountUsdCents,
-      description:
-        plan === "ANNUAL"
-          ? `Suscripción anual (12 meses + 2 de regalo) KR Citas — ${business.name}`
-          : `Suscripción mensual KR Citas — ${business.name}`,
-    });
-  } catch (err) {
-    if (err instanceof Error && err.message === "BINANCE_PAY_NOT_CONFIGURED") {
-      return { success: false, error: "El pago automático con Binance Pay todavía no está habilitado." };
-    }
-    return { success: false, error: "No se pudo crear el pago con Binance Pay. Intenta de nuevo." };
-  }
-
-  const saved = await prisma.binancePayOrder.create({
-    data: {
-      businessId,
-      merchantTradeNo,
-      prepayId: order.prepayId,
-      amountUsdCents,
-      checkoutUrl: order.checkoutUrl,
-      qrcodeLink: order.qrcodeLink,
-    },
-  });
-
-  return { success: true, orderId: saved.id, checkoutUrl: order.checkoutUrl, qrcodeLink: order.qrcodeLink };
-}
-
-// Polled by the client while a Binance Pay checkout is open — once the
-// webhook marks it PAID, the UI can refresh the page to show the new due
-// date without the customer or an admin doing anything else.
-export async function getBinancePayOrderStatus(orderId: string): Promise<BinancePayOrderStatus | null> {
-  const { businessId } = await requireBusinessUser();
-  const order = await prisma.binancePayOrder.findFirst({
-    where: { id: orderId, businessId },
-    select: { status: true },
-  });
-  return order?.status ?? null;
-}
-
-export type PagoMovilOrderResult =
-  | { success: true; orderId: string; amountBs: string; expiresAt: Date }
-  | { success: false; error: string };
-
-const PAGO_MOVIL_ORDER_TTL_MINUTES = 60;
-
-// Reserves a specific Bs amount (the real fee plus a few random bolívar
-// cents) for the business to transfer via Pago Móvil — there's no merchant
-// API to create a "checkout" the way Binance Pay has, so this is the closest
-// equivalent: a unique-enough amount that app/api/webhooks/banesco-email/
-// route.ts can match a forwarded bank notification email back to, without
-// needing the payer to type in any reference code. Expires after
-// PAGO_MOVIL_ORDER_TTL_MINUTES so a stale unpaid reservation can't keep
-// colliding with new ones asking for the same bumped amount.
-export async function createPagoMovilOrder(plan: BillingPlan = "MONTHLY"): Promise<PagoMovilOrderResult> {
-  const { businessId } = await requireBusinessUser();
-
-  const [business, settings] = await Promise.all([
-    prisma.business.findUnique({ where: { id: businessId }, select: { monthlyFeeUsdCents: true } }),
-    prisma.platformSettings.findUnique({ where: { id: PLATFORM_SETTINGS_ID } }),
-  ]);
-  if (!business?.monthlyFeeUsdCents) {
-    return { success: false, error: "Todavía no tienes un ciclo de cobro configurado." };
-  }
-  if (settings?.billingExchangeRate == null) {
-    return { success: false, error: "El pago automático por Pago Móvil todavía no está habilitado." };
-  }
-
-  const amountUsdCents = plan === "ANNUAL" ? business.monthlyFeeUsdCents * 12 : business.monthlyFeeUsdCents;
-  const rate = Number(settings.billingExchangeRate);
-  const baseAmountBsCents = Math.round((amountUsdCents / 100) * rate * 100);
-
-  const expiresAt = new Date();
-  expiresAt.setMinutes(expiresAt.getMinutes() + PAGO_MOVIL_ORDER_TTL_MINUTES);
-
-  // The random offset (+0.01 to +0.99 Bs) is what disambiguates this order
-  // from any other business's pending request for the same base fee —
-  // checked across every business, not just this one (Citas has no RLS
-  // layer to work around here, unlike KR POS).
-  let expectedAmountBsCents: number | null = null;
-  for (let attempt = 0; attempt < 10 && expectedAmountBsCents == null; attempt++) {
-    const candidate = baseAmountBsCents + 1 + Math.floor(Math.random() * 98);
-    const collision = await prisma.pagoMovilOrder.findFirst({
-      where: { expectedAmountBsCents: candidate, status: "PENDING", expiresAt: { gt: new Date() } },
-      select: { id: true },
-    });
-    if (!collision) expectedAmountBsCents = candidate;
-  }
-  if (expectedAmountBsCents == null) {
-    return {
-      success: false,
-      error: "Hay demasiadas solicitudes de pago activas ahora mismo — intenta de nuevo en unos minutos.",
-    };
-  }
-
-  const order = await prisma.pagoMovilOrder.create({
-    data: {
-      businessId,
-      amountUsdCents,
-      exchangeRate: settings.billingExchangeRate,
-      expectedAmountBsCents,
-      expiresAt,
-    },
-  });
-
-  return {
-    success: true,
-    orderId: order.id,
-    amountBs: (expectedAmountBsCents / 100).toFixed(2),
-    expiresAt,
-  };
-}
-
-// Polled by the client while a Pago Móvil order is open — once the webhook
-// at app/api/webhooks/banesco-email/route.ts matches a forwarded
-// notification email to this order, the UI can refresh to show the new due
-// date without the customer or an admin doing anything else. Nothing ever
-// writes an EXPIRED status to the row itself (there's no cron sweeping
-// these) — a still-PENDING order past its expiresAt is reported as EXPIRED
-// here instead, purely derived, so the polling UI knows to stop waiting.
-export async function getPagoMovilOrderStatus(orderId: string): Promise<PagoMovilOrderStatus | null> {
-  const { businessId } = await requireBusinessUser();
-  const order = await prisma.pagoMovilOrder.findFirst({
-    where: { id: orderId, businessId },
-    select: { status: true, expiresAt: true },
-  });
-  if (!order) return null;
-  if (order.status === "PENDING" && order.expiresAt < new Date()) return "EXPIRED";
-  return order.status;
 }

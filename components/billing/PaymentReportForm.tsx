@@ -11,6 +11,12 @@ import { PAYMENT_METHODS_REQUIRING_REFERENCE } from "@/lib/validations";
 import { resizeImageToDataUrl } from "@/lib/image-utils";
 import type { PaymentMethod } from "@prisma/client";
 
+// The subscription only accepts these two rails now — no more cash, card,
+// Binance, etc. for paying KR System itself (this restriction is specific to
+// this billing report, not the general PAYMENT_METHOD_LABELS used elsewhere
+// for a business' own service payments).
+const BILLING_PAYMENT_METHODS: PaymentMethod[] = ["TRANSFER", "PAGO_MOVIL"];
+
 type ReportLine = { paymentMethod: PaymentMethod; amount: string; reference: string };
 
 const MAX_DIMENSION = 1400;
@@ -85,7 +91,7 @@ export function PaymentReportForm() {
       {lines.map((line, i) => (
         <div key={i} className="flex flex-col gap-2 rounded-lg border border-border p-3">
           <div className="flex gap-2 flex-wrap">
-            {(Object.keys(PAYMENT_METHOD_LABELS) as PaymentMethod[]).map((m) => (
+            {BILLING_PAYMENT_METHODS.map((m) => (
               <Button
                 key={m}
                 type="button"
@@ -134,7 +140,7 @@ export function PaymentReportForm() {
       </Button>
 
       <div className="flex flex-col gap-1.5">
-        <Label>Comprobante de pago</Label>
+        <Label>Comprobante de pago (obligatorio)</Label>
         <div className="flex items-center gap-3">
           {proofImageDataUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
@@ -153,6 +159,7 @@ export function PaymentReportForm() {
             type="file"
             accept="image/*"
             onChange={handleFileChange}
+            required
             className="text-sm"
           />
         </div>

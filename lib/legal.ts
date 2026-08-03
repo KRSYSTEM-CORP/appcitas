@@ -1,3 +1,5 @@
-export const WHATSAPP_URL = `https://wa.me/19045796156?text=${encodeURIComponent(
+export const WHATSAPP_PHONE = "19045796156";
+
+export const WHATSAPP_URL = `https://wa.me/${WHATSAPP_PHONE}?text=${encodeURIComponent(
   "Hola, quiero obtener este sistema para mi negocio / más información."
 )}`;

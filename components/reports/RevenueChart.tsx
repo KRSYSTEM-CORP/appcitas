@@ -1,4 +1,5 @@
-import { formatMoney, toDateKey } from "@/lib/format";
+import { formatMoney } from "@/lib/format";
+import { todayDateKey } from "@/lib/timezone";
 
 export function RevenueChart({
   data,
@@ -8,7 +9,7 @@ export function RevenueChart({
   currencyCode: string;
 }) {
   const max = Math.max(...data.map((d) => d.cents), 1);
-  const todayKey = toDateKey(new Date());
+  const todayKey = todayDateKey();
 
   return (
     <div className="rounded-md border border-border bg-card p-4">

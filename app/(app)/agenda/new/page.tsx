@@ -3,7 +3,7 @@ import { listActiveSpecialists } from "@/lib/actions/specialists";
 import { listActiveServices } from "@/lib/actions/services";
 import { listClients } from "@/lib/actions/clients";
 import { getFxInfo } from "@/lib/actions/business";
-import { toDateKey } from "@/lib/format";
+import { todayDateKey } from "@/lib/timezone";
 
 export default async function NewAppointmentPage({
   searchParams,
@@ -34,7 +34,7 @@ export default async function NewAppointmentPage({
           clients={clients}
           currencyCode={fx.localCurrencyCode}
           rate={fx.rate}
-          defaultDateKey={date ?? toDateKey(new Date())}
+          defaultDateKey={date ?? todayDateKey()}
         />
       )}
     </div>

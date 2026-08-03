@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { ClientSchema } from "@/lib/validations";
+import { zonedTimeToUtc, zonedMidnightUtc, zonedHM, weekdayOf } from "@/lib/timezone";
 import type { ActionResult } from "@/lib/types";
 import type { AppointmentStatus } from "@prisma/client";
 
@@ -117,9 +118,14 @@ export async function getAvailableSlots(
   serviceId: string,
   dateKey: string,
 ): Promise<string[]> {
-  const dayStart = new Date(`${dateKey}T00:00:00`);
-  if (Number.isNaN(dayStart.getTime())) return [];
-  const weekday = dayStart.getDay();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) return [];
+  // Boundaries below are all real UTC instants representing Caracas
+  // wall-clock times for this calendar day — never the runtime's own
+  // (UTC-on-Vercel) reading of "midnight"/"09:00"/etc., which would be off
+  // by the zone's offset. See lib/timezone.ts for why this matters.
+  const dayStart = zonedMidnightUtc(dateKey);
+  const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60_000);
+  const weekday = weekdayOf(dateKey);
 
   const [businessHours, service, appointments] = await Promise.all([
     prisma.businessHour.findUnique({ where: { businessId_weekday: { businessId, weekday } } }),
@@ -132,7 +138,7 @@ export async function getAvailableSlots(
         businessId,
         specialistId,
         status: { notIn: ["CANCELLED", "NO_SHOW"] },
-        startsAt: { gte: dayStart, lt: new Date(dayStart.getTime() + 24 * 60 * 60_000) },
+        startsAt: { gte: dayStart, lt: dayEnd },
       },
       select: { startsAt: true, endsAt: true },
     }),
@@ -146,26 +152,14 @@ export async function getAvailableSlots(
   const hours = service.hasCustomHours ? service.hours[0] : businessHours;
   if (!hours || hours.isClosed || !hours.opensAt || !hours.closesAt) return [];
 
-  const [openH, openM] = hours.opensAt.split(":").map(Number);
-  const [closeH, closeM] = hours.closesAt.split(":").map(Number);
-  const dayOpen = new Date(dayStart);
-  dayOpen.setHours(openH, openM, 0, 0);
-  const dayClose = new Date(dayStart);
-  dayClose.setHours(closeH, closeM, 0, 0);
+  const dayOpen = zonedTimeToUtc(dateKey, hours.opensAt);
+  const dayClose = zonedTimeToUtc(dateKey, hours.closesAt);
 
   // An optional daily break (e.g. lunch) carved out of the open/close window —
   // treated exactly like an appointment for overlap purposes below, so a
   // slot that would spill into it is skipped the same way a booked slot is.
-  let breakStart: Date | null = null;
-  let breakEnd: Date | null = null;
-  if (hours.breakStart && hours.breakEnd) {
-    const [breakStartH, breakStartM] = hours.breakStart.split(":").map(Number);
-    const [breakEndH, breakEndM] = hours.breakEnd.split(":").map(Number);
-    breakStart = new Date(dayStart);
-    breakStart.setHours(breakStartH, breakStartM, 0, 0);
-    breakEnd = new Date(dayStart);
-    breakEnd.setHours(breakEndH, breakEndM, 0, 0);
-  }
+  const breakStart = hours.breakStart ? zonedTimeToUtc(dateKey, hours.breakStart) : null;
+  const breakEnd = hours.breakEnd ? zonedTimeToUtc(dateKey, hours.breakEnd) : null;
 
   const now = new Date();
   const slots: string[] = [];
@@ -179,7 +173,7 @@ export async function getAvailableSlots(
     const overlapsAppointment = appointments.some((a) => slotStart < a.endsAt && slotEnd > a.startsAt);
     const overlapsBreak = breakStart && breakEnd && slotStart < breakEnd && slotEnd > breakStart;
     if (!overlapsAppointment && !overlapsBreak) {
-      slots.push(`${String(slotStart.getHours()).padStart(2, "0")}:${String(slotStart.getMinutes()).padStart(2, "0")}`);
+      slots.push(zonedHM(slotStart));
     }
   }
   return slots;
@@ -212,7 +206,7 @@ export async function createPublicAppointment(input: PublicBookingInput): Promis
   if (!specialist) return { success: false, error: "Especialista no válido" };
   if (!service) return { success: false, error: "Servicio no válido" };
 
-  const startsAt = new Date(`${input.dateKey}T${input.time}:00`);
+  const startsAt = zonedTimeToUtc(input.dateKey, input.time);
   if (Number.isNaN(startsAt.getTime()) || startsAt < new Date()) {
     return { success: false, error: "Elige una fecha y hora válidas" };
   }

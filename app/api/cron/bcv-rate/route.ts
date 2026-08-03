@@ -3,7 +3,8 @@ import { prisma } from "@/lib/prisma";
 import { fetchBcvRate } from "@/lib/bcv-rate";
 import { PLATFORM_SETTINGS_ID } from "@/lib/billing";
 
-// Runs once a day (see vercel.json's "crons" entry) and refreshes every
+// Runs once a day at 00:00 Venezuela time (04:00 UTC — Vercel cron schedules
+// always run in UTC, see vercel.json's "crons" entry) and refreshes every
 // FX-enabled VES business's exchange rate automatically. Also refreshes
 // PlatformSettings.billingExchangeRate, the separate platform-wide USD/VES
 // rate used to price each business's subscription in /billing — subscriptions

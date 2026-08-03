@@ -162,7 +162,10 @@ export const USD_ALWAYS_METHODS = ["BINANCE"] as const;
 export const PaymentCurrencySchema = z.enum(["LOCAL", "FOREIGN"]);
 
 export const PaymentSchema = z.object({
-  amount: z.coerce.number().positive("El monto debe ser mayor a 0"),
+  // >= 0, not > 0 — a $0 line is how a fully exonerated (comped) session
+  // gets recorded as settled, instead of sitting forever as "pendiente" with
+  // no real transaction to explain why (see PaymentForm's "Exonerar" button).
+  amount: z.coerce.number().nonnegative("El monto no puede ser negativo"),
   currency: PaymentCurrencySchema,
   paymentMethod: PaymentMethodSchema,
   reference: z.string().trim().optional().or(z.literal("")),

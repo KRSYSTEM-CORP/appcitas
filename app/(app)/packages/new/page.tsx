@@ -3,7 +3,7 @@ import { listActiveSpecialists } from "@/lib/actions/specialists";
 import { listActiveServices } from "@/lib/actions/services";
 import { listClients } from "@/lib/actions/clients";
 import { getFxInfo } from "@/lib/actions/business";
-import { toDateKey } from "@/lib/format";
+import { todayDateKey } from "@/lib/timezone";
 
 export default async function NewPackagePage() {
   const [specialists, services, clients, fx] = await Promise.all([
@@ -33,7 +33,7 @@ export default async function NewPackagePage() {
           clients={clients}
           currencyCode={fx.localCurrencyCode}
           rate={fx.rate}
-          defaultDateKey={toDateKey(new Date())}
+          defaultDateKey={todayDateKey()}
         />
       )}
     </div>

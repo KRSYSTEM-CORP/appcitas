@@ -15,8 +15,8 @@ import {
   formatDate,
   formatMoney,
   formatTime,
-  toDateKey,
 } from "@/lib/format";
+import { dateKeyOf } from "@/lib/timezone";
 import type { PackageDetail } from "@/lib/actions/packages";
 import type { AppointmentStatus } from "@prisma/client";
 
@@ -182,7 +182,7 @@ export function PackageDetailView({
                 Sesión {a.sessionNumber} · {formatDate(a.startsAt)} {formatTime(a.startsAt)}
               </p>
               <Link
-                href={`/agenda?date=${toDateKey(a.startsAt)}`}
+                href={`/agenda?date=${dateKeyOf(a.startsAt)}`}
                 className="text-xs underline underline-offset-2 opacity-70 hover:opacity-100"
               >
                 Ver en agenda

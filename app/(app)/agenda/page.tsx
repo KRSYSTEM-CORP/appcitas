@@ -6,13 +6,18 @@ import { listAppointmentsInRange } from "@/lib/actions/appointments";
 import { listActiveSpecialists } from "@/lib/actions/specialists";
 import { getFxInfo, getBusinessHourForWeekday } from "@/lib/actions/business";
 import { requireSession } from "@/lib/session";
-import { formatDate, formatDayLabel, toDateKey } from "@/lib/format";
+import { formatDate, formatDayLabel } from "@/lib/format";
 import { RANGE_VIEWS, getRange, shiftDate, type RangeView } from "@/lib/date-range";
+import { todayDateKey, dateKeyOf, weekdayOf, zonedMidnightUtc, SHOP_TIME_ZONE } from "@/lib/timezone";
 
 type AgendaView = RangeView;
 const VIEWS = RANGE_VIEWS;
 
-const MONTH_LABEL_FORMATTER = new Intl.DateTimeFormat("es-VE", { month: "long", year: "numeric" });
+const MONTH_LABEL_FORMATTER = new Intl.DateTimeFormat("es-VE", {
+  month: "long",
+  year: "numeric",
+  timeZone: SHOP_TIME_ZONE,
+});
 
 export default async function AgendaPage({
   searchParams,
@@ -21,11 +26,11 @@ export default async function AgendaPage({
 }) {
   const session = await requireSession();
   const { date, view: viewParam } = await searchParams;
-  const dateKey = date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : toDateKey(new Date());
+  const dateKey = date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : todayDateKey();
   const view: AgendaView = VIEWS.some((v) => v.key === viewParam) ? (viewParam as AgendaView) : "day";
 
   const { start, end } = getRange(view, dateKey);
-  const dayWeekday = new Date(`${dateKey}T00:00:00`).getDay();
+  const dayWeekday = weekdayOf(dateKey);
 
   const [appointments, specialists, fx, dayHours] = await Promise.all([
     listAppointmentsInRange(start, end),
@@ -36,7 +41,7 @@ export default async function AgendaPage({
 
   const rangeLabel =
     view === "day"
-      ? formatDayLabel(new Date(`${dateKey}T00:00:00`))
+      ? formatDayLabel(zonedMidnightUtc(dateKey))
       : view === "week"
         ? `${formatDate(start)} – ${formatDate(new Date(end.getTime() - 24 * 60 * 60_000))}`
         : MONTH_LABEL_FORMATTER.format(start);
@@ -58,7 +63,7 @@ export default async function AgendaPage({
           {VIEWS.map((v) => (
             <Link
               key={v.key}
-              href={`/agenda?view=${v.key}&date=${v.key === "day" ? toDateKey(new Date()) : dateKey}`}
+              href={`/agenda?view=${v.key}&date=${v.key === "day" ? todayDateKey() : dateKey}`}
               className={`rounded-md border px-3 py-1.5 text-sm font-medium transition-colors ${
                 view === v.key ? "bg-primary text-primary-foreground border-primary" : "border-input hover:bg-accent"
               }`}
@@ -75,7 +80,7 @@ export default async function AgendaPage({
             ← Anterior
           </Link>
           <Link
-            href={`/agenda?view=${view}&date=${toDateKey(new Date())}`}
+            href={`/agenda?view=${view}&date=${todayDateKey()}`}
             className={buttonVariants({ variant: "outline", size: "sm" })}
           >
             Hoy
@@ -140,14 +145,14 @@ export default async function AgendaPage({
         <div className="flex flex-col gap-6">
           {Object.entries(
             appointments.reduce<Record<string, typeof appointments>>((groups, a) => {
-              const key = toDateKey(a.startsAt);
+              const key = dateKeyOf(a.startsAt);
               (groups[key] ??= []).push(a);
               return groups;
             }, {}),
           ).map(([groupDateKey, dayAppointments]) => (
             <div key={groupDateKey} className="flex flex-col gap-2">
               <h2 className="text-sm font-semibold capitalize">
-                {formatDayLabel(new Date(`${groupDateKey}T00:00:00`))}
+                {formatDayLabel(zonedMidnightUtc(groupDateKey))}
               </h2>
               <div className="grid gap-3 sm:grid-cols-2">
                 {dayAppointments.map((a) => (

@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { recordPayments } from "@/lib/actions/payments";
-import { PAYMENT_METHOD_LABELS } from "@/lib/format";
+import { PAYMENT_METHOD_LABELS, formatMoney } from "@/lib/format";
 import { PAYMENT_METHODS_REQUIRING_REFERENCE, USD_ALWAYS_METHODS } from "@/lib/validations";
 import type { PaymentMethod } from "@prisma/client";
 
@@ -43,11 +43,38 @@ export function PaymentForm({
 }) {
   const router = useRouter();
   const [lines, setLines] = useState<Line[]>([newLine(defaultAmount.toFixed(2))]);
+  const [discount, setDiscount] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
   function updateLine(id: string, patch: Partial<Line>) {
     setLines((prev) => prev.map((l) => (l.id === id ? { ...l, ...patch } : l)));
+  }
+
+  // Discount only ever recalculates the FIRST line (the one pre-filled with
+  // the service's full price) — extra split-payment lines someone adds
+  // afterward are their own separate charges and shouldn't get discounted
+  // along with it.
+  function applyDiscount(rawDiscount: string) {
+    setDiscount(rawDiscount);
+    const discountAmount = Number(rawDiscount);
+    if (!Number.isFinite(discountAmount) || discountAmount < 0) return;
+    setLines((prev) => {
+      if (prev.length === 0) return prev;
+      const [first, ...rest] = prev;
+      if (first.currency !== "LOCAL") return prev; // discount is entered in local currency only
+      const discounted = Math.max(0, defaultAmount - discountAmount);
+      return [{ ...first, amount: discounted.toFixed(2) }, ...rest];
+    });
+  }
+
+  function exempt() {
+    setDiscount(defaultAmount.toFixed(2));
+    setLines((prev) => {
+      if (prev.length === 0) return prev;
+      const [first, ...rest] = prev;
+      return [{ ...first, amount: "0", currency: "LOCAL", method: "OTHER", reference: "Exonerado" }, ...rest];
+    });
   }
 
   function switchLineCurrency(line: Line, next: "LOCAL" | "FOREIGN", extraPatch?: Partial<Line>) {
@@ -88,8 +115,10 @@ export function PaymentForm({
     setError(null);
 
     for (const line of lines) {
-      if (!(Number(line.amount) > 0)) {
-        setError("Cada línea de pago necesita un monto mayor a 0");
+      // 0 is allowed — that's what a fully exonerated line looks like (see
+      // the "Exonerar" button above) — only negative/invalid amounts fail.
+      if (!(Number(line.amount) >= 0)) {
+        setError("Cada línea de pago necesita un monto válido");
         return;
       }
       const needsReference = (PAYMENT_METHODS_REQUIRING_REFERENCE as readonly string[]).includes(line.method);
@@ -118,6 +147,32 @@ export function PaymentForm({
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-3 rounded-md border border-border bg-card p-2.5">
+      <div className="flex flex-col gap-2 rounded-md border border-dashed border-border p-2">
+        <div className="flex items-end gap-2">
+          <div className="flex flex-col gap-1 flex-1">
+            <Label htmlFor="payment-discount" className="text-xs">
+              Descuento ({localCurrencyCode}, opcional)
+            </Label>
+            <Input
+              id="payment-discount"
+              type="number"
+              min="0"
+              step="0.01"
+              value={discount}
+              onChange={(e) => applyDiscount(e.target.value)}
+              placeholder="0.00"
+              className="h-8 text-sm"
+            />
+          </div>
+          <Button type="button" size="sm" variant="outline" onClick={exempt} className="h-8">
+            Exonerar (gratis)
+          </Button>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Precio original: {formatMoney(Math.round(defaultAmount * 100), localCurrencyCode)}
+        </p>
+      </div>
+
       {lines.map((line, i) => {
         const needsReference = (PAYMENT_METHODS_REQUIRING_REFERENCE as readonly string[]).includes(line.method);
         const isUsdAlwaysMethod = (USD_ALWAYS_METHODS as readonly string[]).includes(line.method);

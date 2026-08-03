@@ -2,7 +2,7 @@
   "crons": [
     {
       "path": "/api/cron/bcv-rate",
-      "schedule": "0 17 * * *"
+      "schedule": "0 4 * * *"
     }
   ]
 }

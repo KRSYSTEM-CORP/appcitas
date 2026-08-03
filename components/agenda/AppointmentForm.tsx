@@ -1,11 +1,11 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { createAppointment } from "@/lib/actions/appointments";
+import { createAppointment, getAvailableSlotsForStaff } from "@/lib/actions/appointments";
 import { formatDuration, formatMoney } from "@/lib/format";
 import { serviceLocalPriceCents } from "@/lib/pricing";
 import type { SpecialistListItem } from "@/lib/actions/specialists";
@@ -13,6 +13,15 @@ import type { ServiceListItem } from "@/lib/actions/services";
 import type { ClientListItem } from "@/lib/actions/clients";
 
 const NEW_CLIENT = "__new__";
+
+// Pure "HH:mm" string arithmetic, deliberately not a Date object — the slot
+// itself is already a Caracas wall-clock reading (see getAvailableSlots), so
+// adding a duration to it needs no timezone conversion at all, just minutes.
+function addMinutesToTime(time: string, minutes: number): string {
+  const [h, m] = time.split(":").map(Number);
+  const total = (h * 60 + m + minutes) % (24 * 60);
+  return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+}
 
 export function AppointmentForm({
   specialists,
@@ -37,10 +46,12 @@ export function AppointmentForm({
   const [newLastName, setNewLastName] = useState("");
   const [newPhone, setNewPhone] = useState("");
   const [dateKey, setDateKey] = useState(defaultDateKey);
-  const [time, setTime] = useState("09:00");
+  const [time, setTime] = useState<string | null>(null);
+  const [slots, setSlots] = useState<string[]>([]);
   const [notes, setNotes] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const [loadingSlots, startSlotsTransition] = useTransition();
 
   const availableServices = useMemo(() => {
     const specialist = specialists.find((s) => s.id === specialistId);
@@ -50,12 +61,38 @@ export function AppointmentForm({
 
   const selectedService = availableServices.find((s) => s.id === serviceId);
 
+  // Same free/busy source the public booking link uses (getAvailableSlots),
+  // just wrapped with the signed-in session's own businessId instead of a
+  // client-supplied one — staff sees exactly the same "only what's actually
+  // open" picker a client would, instead of a free-text time field that let
+  // double-bookings or off-hours times through until submit.
+  useEffect(() => {
+    setTime(null);
+    if (!specialistId || !serviceId || !dateKey) {
+      setSlots([]);
+      return;
+    }
+    let cancelled = false;
+    startSlotsTransition(async () => {
+      const result = await getAvailableSlotsForStaff(specialistId, serviceId, dateKey);
+      if (!cancelled) setSlots(result);
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [specialistId, serviceId, dateKey]);
+
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
 
     if (!serviceId) {
       setError("Elige un servicio");
+      return;
+    }
+    if (!time) {
+      setError("Elige un horario disponible");
       return;
     }
     if (clientChoice === NEW_CLIENT && (!newFirstName.trim() || !newLastName.trim() || !newPhone.trim())) {
@@ -131,26 +168,43 @@ export function AppointmentForm({
             );
           })}
         </select>
-        {selectedService && (
-          <p className="text-xs text-muted-foreground">
-            Termina a las{" "}
-            {new Intl.DateTimeFormat("es-VE", { hour: "2-digit", minute: "2-digit" }).format(
-              new Date(`${dateKey}T${time}:00`).getTime() + selectedService.durationMinutes * 60_000,
-            )}
-          </p>
+        {selectedService && time && (
+          <p className="text-xs text-muted-foreground">Termina a las {addMinutesToTime(time, selectedService.durationMinutes)}</p>
         )}
       </div>
 
-      <div className="flex gap-3">
-        <div className="flex flex-col gap-1.5 flex-1">
-          <Label htmlFor="dateKey">Fecha</Label>
-          <Input id="dateKey" type="date" value={dateKey} onChange={(e) => setDateKey(e.target.value)} required />
-        </div>
-        <div className="flex flex-col gap-1.5 flex-1">
-          <Label htmlFor="time">Hora</Label>
-          <Input id="time" type="time" value={time} onChange={(e) => setTime(e.target.value)} required />
-        </div>
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="dateKey">Fecha</Label>
+        <Input id="dateKey" type="date" value={dateKey} onChange={(e) => setDateKey(e.target.value)} required />
       </div>
+
+      {specialistId && serviceId && dateKey && (
+        <div className="flex flex-col gap-1.5">
+          <Label>Horario disponible</Label>
+          {loadingSlots ? (
+            <p className="text-sm text-muted-foreground">Buscando horarios...</p>
+          ) : slots.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No hay horarios disponibles ese día. Prueba otra fecha.</p>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {slots.map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => setTime(s)}
+                  className={`rounded-md border px-3 py-1.5 text-sm tabular-nums transition-colors ${
+                    time === s
+                      ? "bg-primary text-primary-foreground border-primary"
+                      : "border-input hover:bg-accent"
+                  }`}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="clientChoice">Cliente</Label>

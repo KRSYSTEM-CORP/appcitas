@@ -1,8 +1,9 @@
 import { APPOINTMENT_STATUS_LABELS, APPOINTMENT_STATUS_STYLES, formatTime } from "@/lib/format";
+import { zonedMinutesOfDay } from "@/lib/timezone";
 import type { AppointmentListItem } from "@/lib/actions/appointments";
 import type { DayHours } from "@/lib/actions/business";
 
-const PIXELS_PER_HOUR = 64;
+const PIXELS_PER_HOUR = 80;
 
 function toMinutes(hhmm: string): number {
   const [h, m] = hhmm.split(":").map(Number);
@@ -101,18 +102,25 @@ export function DayTimeline({
                   </div>
                 )}
                 {specialistAppointments.map((a) => {
-                  const startMinutes = a.startsAt.getHours() * 60 + a.startsAt.getMinutes();
-                  const endMinutes = a.endsAt.getHours() * 60 + a.endsAt.getMinutes();
+                  const startMinutes = zonedMinutesOfDay(a.startsAt);
+                  const endMinutes = zonedMinutesOfDay(a.endsAt);
                   const top = topPct(startMinutes);
                   const height = Math.max(topPct(endMinutes) - top, 2);
+                  const clientName = `${a.client.firstName} ${a.client.lastName}`;
                   return (
                     <div
                       key={a.id}
                       className={`absolute left-1 right-1 rounded border px-1.5 py-0.5 overflow-hidden text-[11px] leading-tight ${APPOINTMENT_STATUS_STYLES[a.status]}`}
                       style={{ top: `${top}%`, height: `${height}%` }}
-                      title={`${a.client.firstName} ${a.client.lastName} · ${a.service.name} · ${APPOINTMENT_STATUS_LABELS[a.status]}`}
+                      title={`${clientName} · ${a.service.name} · ${APPOINTMENT_STATUS_LABELS[a.status]}`}
                     >
-                      <span className="font-medium">{formatTime(a.startsAt)}</span> {a.client.firstName}
+                      <p className="font-medium truncate">
+                        {formatTime(a.startsAt)}–{formatTime(a.endsAt)}
+                      </p>
+                      <p className="truncate">{clientName}</p>
+                      <p className="truncate opacity-80">
+                        {a.service.name} · {APPOINTMENT_STATUS_LABELS[a.status]}
+                      </p>
                     </div>
                   );
                 })}

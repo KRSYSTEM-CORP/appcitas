@@ -1,4 +1,5 @@
 import type { AppointmentStatus, PaymentMethod } from "@prisma/client";
+import { SHOP_TIME_ZONE } from "@/lib/timezone";
 
 export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
   CASH: "Efectivo",
@@ -42,22 +43,44 @@ export function formatDuration(minutes: number): string {
   return rest === 0 ? `${hours} h` : `${hours} h ${rest} min`;
 }
 
+// Pinned to SHOP_TIME_ZONE (not the runtime's own clock) so the time shown
+// is always the real Venezuela-local one — otherwise a server component
+// rendered on Vercel (UTC) can show a time up to 4 hours off from what the
+// user's own device says, and differ from what the same value renders as
+// once a client component hydrates in the browser.
 export function formatTime(date: Date | string): string {
   const d = typeof date === "string" ? new Date(date) : date;
-  return new Intl.DateTimeFormat("es-VE", { hour: "2-digit", minute: "2-digit" }).format(d);
+  return new Intl.DateTimeFormat("es-VE", { hour: "2-digit", minute: "2-digit", timeZone: SHOP_TIME_ZONE }).format(d);
 }
 
 export function formatDate(date: Date | string): string {
   const d = typeof date === "string" ? new Date(date) : date;
-  return new Intl.DateTimeFormat("es-VE", { day: "2-digit", month: "short", year: "numeric" }).format(d);
+  return new Intl.DateTimeFormat("es-VE", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    timeZone: SHOP_TIME_ZONE,
+  }).format(d);
 }
 
 export function formatDayLabel(date: Date): string {
-  return new Intl.DateTimeFormat("es-VE", { weekday: "long", day: "2-digit", month: "long" }).format(date);
+  return new Intl.DateTimeFormat("es-VE", {
+    weekday: "long",
+    day: "2-digit",
+    month: "long",
+    timeZone: SHOP_TIME_ZONE,
+  }).format(date);
 }
 
-// YYYY-MM-DD in local time (not UTC) — used for <input type="date"> values
-// and for building a day's start/end boundaries.
+// YYYY-MM-DD read via the runtime's OWN local clock — reserved for the pure
+// calendar-string arithmetic in lib/date-range.ts (adding/subtracting days
+// from an already-known dateKey), which never touches a real timestamp and
+// stays internally self-consistent regardless of what "local" means here.
+// For anything that starts from a REAL instant (Appointment.startsAt,
+// `new Date()` as "right now") use dateKeyOf()/todayDateKey() from
+// lib/timezone.ts instead — this function would silently return the wrong
+// calendar day for those (e.g. an appointment at 22:00 Caracas already being
+// past UTC midnight the next day).
 export function toDateKey(date: Date): string {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, "0");

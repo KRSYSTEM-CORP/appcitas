@@ -5,12 +5,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { getAvailableSlots, createPublicAppointment } from "@/lib/actions/public";
-import { formatDuration, formatMoney, toDateKey } from "@/lib/format";
+import { formatDuration, formatMoney } from "@/lib/format";
+import { todayDateKey } from "@/lib/timezone";
 import { serviceLocalPriceCents } from "@/lib/pricing";
 import type { PublicService, PublicSpecialist } from "@/lib/actions/public";
 
 function todayKey() {
-  return toDateKey(new Date());
+  return todayDateKey();
 }
 
 export function BookingWidget({

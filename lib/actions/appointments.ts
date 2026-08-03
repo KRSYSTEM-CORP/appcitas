@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
+import { zonedTimeToUtc } from "@/lib/timezone";
+import { getAvailableSlots } from "@/lib/actions/public";
 import type { ActionResult } from "@/lib/types";
 import type { AppointmentStatus, PackagePaymentMode, PaymentMethod } from "@prisma/client";
 
@@ -92,7 +94,7 @@ export async function createAppointment(input: CreateAppointmentInput): Promise<
   if (!specialist) return { success: false, error: "Especialista no válido" };
   if (!service) return { success: false, error: "Servicio no válido" };
 
-  const startsAt = new Date(`${input.dateKey}T${input.time}:00`);
+  const startsAt = zonedTimeToUtc(input.dateKey, input.time);
   if (Number.isNaN(startsAt.getTime())) return { success: false, error: "Fecha u hora inválidas" };
   const endsAt = new Date(startsAt.getTime() + service.durationMinutes * 60_000);
 
@@ -162,4 +164,18 @@ export async function updateAppointmentStatus(
 
   revalidatePath("/agenda");
   return { success: true };
+}
+
+// Session-authenticated counterpart to the public getAvailableSlots (used by
+// the public booking widget) — resolves businessId from the signed-in
+// session instead of trusting a client-supplied one, so the internal "Nueva
+// cita" form shows staff exactly the same free/busy slots a client would see
+// on the public booking link, instead of a free-text time field.
+export async function getAvailableSlotsForStaff(
+  specialistId: string,
+  serviceId: string,
+  dateKey: string,
+): Promise<string[]> {
+  const { businessId } = await requireSession();
+  return getAvailableSlots(businessId, specialistId, serviceId, dateKey);
 }

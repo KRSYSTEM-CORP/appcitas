@@ -3,16 +3,21 @@ import { buttonVariants } from "@/components/ui/button";
 import { DeletePackageButton } from "@/components/packages/DeletePackageButton";
 import { listPackages } from "@/lib/actions/packages";
 import { getFxInfo } from "@/lib/actions/business";
-import { formatDate, formatDayLabel, formatMoney, toDateKey } from "@/lib/format";
+import { formatDate, formatDayLabel, formatMoney } from "@/lib/format";
 import { serviceLocalPriceCents } from "@/lib/pricing";
 import { RANGE_VIEWS, getRange, shiftDate, type RangeView } from "@/lib/date-range";
+import { todayDateKey, zonedMidnightUtc, SHOP_TIME_ZONE } from "@/lib/timezone";
 
 const PAYMENT_MODE_LABELS = {
   PACKAGE: "Pago único",
   PER_SESSION: "Pago por sesión",
 } as const;
 
-const MONTH_LABEL_FORMATTER = new Intl.DateTimeFormat("es-VE", { month: "long", year: "numeric" });
+const MONTH_LABEL_FORMATTER = new Intl.DateTimeFormat("es-VE", {
+  month: "long",
+  year: "numeric",
+  timeZone: SHOP_TIME_ZONE,
+});
 
 export default async function PackagesPage({
   searchParams,
@@ -20,7 +25,7 @@ export default async function PackagesPage({
   searchParams: Promise<{ date?: string; view?: string }>;
 }) {
   const { date, view: viewParam } = await searchParams;
-  const dateKey = date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : toDateKey(new Date());
+  const dateKey = date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : todayDateKey();
   const view: RangeView = RANGE_VIEWS.some((v) => v.key === viewParam) ? (viewParam as RangeView) : "month";
 
   const { start, end } = getRange(view, dateKey);
@@ -28,7 +33,7 @@ export default async function PackagesPage({
 
   const rangeLabel =
     view === "day"
-      ? formatDayLabel(new Date(`${dateKey}T00:00:00`))
+      ? formatDayLabel(zonedMidnightUtc(dateKey))
       : view === "week"
         ? `${formatDate(start)} – ${formatDate(new Date(end.getTime() - 24 * 60 * 60_000))}`
         : MONTH_LABEL_FORMATTER.format(start);
@@ -52,7 +57,7 @@ export default async function PackagesPage({
           {RANGE_VIEWS.map((v) => (
             <Link
               key={v.key}
-              href={`/packages?view=${v.key}&date=${v.key === "day" ? toDateKey(new Date()) : dateKey}`}
+              href={`/packages?view=${v.key}&date=${v.key === "day" ? todayDateKey() : dateKey}`}
               className={`rounded-md border px-3 py-1.5 text-sm font-medium transition-colors ${
                 view === v.key ? "bg-primary text-primary-foreground border-primary" : "border-input hover:bg-accent"
               }`}
@@ -69,7 +74,7 @@ export default async function PackagesPage({
             ← Anterior
           </Link>
           <Link
-            href={`/packages?view=${view}&date=${toDateKey(new Date())}`}
+            href={`/packages?view=${view}&date=${todayDateKey()}`}
             className={buttonVariants({ variant: "outline", size: "sm" })}
           >
             Hoy

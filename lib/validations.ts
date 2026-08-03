@@ -59,13 +59,35 @@ export const BrandingSchema = z.object({
     .or(z.literal("")),
 });
 
-const WeekdayHourSchema = z.object({
-  weekday: z.number().int().min(0).max(6),
-  isClosed: z.boolean(),
-  // Closed days round-trip from Prisma as null, not "" or undefined.
-  opensAt: z.string().trim().nullable().optional(),
-  closesAt: z.string().trim().nullable().optional(),
-});
+const WeekdayHourSchema = z
+  .object({
+    weekday: z.number().int().min(0).max(6),
+    isClosed: z.boolean(),
+    // Closed days round-trip from Prisma as null, not "" or undefined.
+    opensAt: z.string().trim().nullable().optional(),
+    closesAt: z.string().trim().nullable().optional(),
+    // Optional single break (e.g. lunch) — both null/empty means no break.
+    breakStart: z.string().trim().nullable().optional(),
+    breakEnd: z.string().trim().nullable().optional(),
+  })
+  .refine((h) => (h.breakStart ? !!h.breakEnd : !h.breakEnd), {
+    message: "Indica inicio y fin del descanso, o deja ambos vacíos",
+    path: ["breakEnd"],
+  })
+  .refine((h) => !h.breakStart || !h.breakEnd || h.breakStart < h.breakEnd, {
+    message: "El descanso debe empezar antes de terminar",
+    path: ["breakEnd"],
+  })
+  .refine(
+    (h) =>
+      h.isClosed ||
+      !h.breakStart ||
+      !h.breakEnd ||
+      !h.opensAt ||
+      !h.closesAt ||
+      (h.breakStart >= h.opensAt && h.breakEnd <= h.closesAt),
+    { message: "El descanso debe estar dentro del horario de atención", path: ["breakStart"] },
+  );
 
 export const BusinessHoursSchema = z.object({
   hours: z.array(WeekdayHourSchema).length(7, "Debe incluir los 7 días de la semana"),

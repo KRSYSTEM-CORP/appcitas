@@ -49,7 +49,14 @@ export type BusinessConfig = {
   foreignCurrencyCode: string;
   currentRate: number | null;
   currentRateUpdatedAt: Date | null;
-  hours: { weekday: number; isClosed: boolean; opensAt: string | null; closesAt: string | null }[];
+  hours: {
+    weekday: number;
+    isClosed: boolean;
+    opensAt: string | null;
+    closesAt: string | null;
+    breakStart: string | null;
+    breakEnd: string | null;
+  }[];
 };
 
 export async function getBusinessConfig(): Promise<BusinessConfig> {
@@ -77,6 +84,8 @@ export async function getBusinessConfig(): Promise<BusinessConfig> {
       isClosed: h.isClosed,
       opensAt: h.opensAt,
       closesAt: h.closesAt,
+      breakStart: h.breakStart,
+      breakEnd: h.breakEnd,
     })),
   };
 }
@@ -105,6 +114,28 @@ export async function getFxInfo(): Promise<FxInfo> {
     foreignCurrencyCode: business?.foreignCurrencyCode ?? "USD",
     rate: business?.exchangeRate != null ? Number(business.exchangeRate) : null,
   };
+}
+
+export type DayHours = {
+  isClosed: boolean;
+  opensAt: string | null;
+  closesAt: string | null;
+  breakStart: string | null;
+  breakEnd: string | null;
+};
+
+// Session-agnostic (any role, not just OWNER) so the agenda's day timeline —
+// visible to specialists too — can read the day's open/close/break window
+// without going through the owner-only getBusinessConfig.
+export async function getBusinessHourForWeekday(weekday: number): Promise<DayHours | null> {
+  const session = await getSession();
+  if (!session) return null;
+
+  const hour = await prisma.businessHour.findUnique({
+    where: { businessId_weekday: { businessId: session.businessId, weekday } },
+    select: { isClosed: true, opensAt: true, closesAt: true, breakStart: true, breakEnd: true },
+  });
+  return hour ?? { isClosed: true, opensAt: null, closesAt: null, breakStart: null, breakEnd: null };
 }
 
 // Enable/disable FX display + pick the reference currency (EUR/USD) — split
@@ -282,6 +313,8 @@ export async function updateBusinessHours(hours: BusinessConfig["hours"]): Promi
           isClosed: h.isClosed,
           opensAt: h.isClosed ? null : h.opensAt || null,
           closesAt: h.isClosed ? null : h.closesAt || null,
+          breakStart: h.isClosed ? null : h.breakStart || null,
+          breakEnd: h.isClosed ? null : h.breakEnd || null,
         },
       }),
     ),

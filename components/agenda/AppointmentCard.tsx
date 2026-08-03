@@ -3,7 +3,7 @@
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { MessageCircle } from "lucide-react";
+import { MessageCircle, MessageCircleCheck } from "lucide-react";
 import { updateAppointmentStatus, type AppointmentListItem } from "@/lib/actions/appointments";
 import { PaymentForm } from "@/components/agenda/PaymentForm";
 import { CopyCancelLinkButton } from "@/components/shared/CopyCancelLinkButton";
@@ -16,7 +16,7 @@ import {
   formatMoney,
   formatTime,
 } from "@/lib/format";
-import { buildWhatsAppReminderLink } from "@/lib/whatsapp";
+import { buildWhatsAppConfirmationLink, buildWhatsAppReminderLink } from "@/lib/whatsapp";
 import type { AppointmentStatus } from "@prisma/client";
 
 const STATUS_OPTIONS: AppointmentStatus[] = ["PENDING", "CONFIRMED", "ATTENDED", "NO_SHOW", "CANCELLED"];
@@ -59,6 +59,13 @@ export function AppointmentCard({
     serviceName: appointment.service.name,
     startsAt: appointment.startsAt,
     cancelUrl: origin ? `${origin}/cancel/${appointment.cancelToken}` : undefined,
+  });
+  const confirmationWhatsappLink = buildWhatsAppConfirmationLink({
+    phone: appointment.client.phone,
+    clientName,
+    businessName,
+    serviceName: appointment.service.name,
+    startsAt: appointment.startsAt,
   });
 
   const localPriceCents =
@@ -106,6 +113,17 @@ export function AppointmentCard({
         </p>
         <div className="flex items-center gap-2 shrink-0">
           <CopyCancelLinkButton cancelToken={appointment.cancelToken} />
+          {appointment.status === "CONFIRMED" && (
+            <a
+              href={confirmationWhatsappLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Enviar confirmación por WhatsApp"
+              className="opacity-70 hover:opacity-100"
+            >
+              <MessageCircleCheck className="size-4" />
+            </a>
+          )}
           <a
             href={whatsappLink}
             target="_blank"

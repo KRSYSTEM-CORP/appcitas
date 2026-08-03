@@ -153,6 +153,20 @@ export async function getAvailableSlots(
   const dayClose = new Date(dayStart);
   dayClose.setHours(closeH, closeM, 0, 0);
 
+  // An optional daily break (e.g. lunch) carved out of the open/close window —
+  // treated exactly like an appointment for overlap purposes below, so a
+  // slot that would spill into it is skipped the same way a booked slot is.
+  let breakStart: Date | null = null;
+  let breakEnd: Date | null = null;
+  if (hours.breakStart && hours.breakEnd) {
+    const [breakStartH, breakStartM] = hours.breakStart.split(":").map(Number);
+    const [breakEndH, breakEndM] = hours.breakEnd.split(":").map(Number);
+    breakStart = new Date(dayStart);
+    breakStart.setHours(breakStartH, breakStartM, 0, 0);
+    breakEnd = new Date(dayStart);
+    breakEnd.setHours(breakEndH, breakEndM, 0, 0);
+  }
+
   const now = new Date();
   const slots: string[] = [];
   for (
@@ -162,8 +176,9 @@ export async function getAvailableSlots(
   ) {
     const slotEnd = new Date(slotStart.getTime() + service.durationMinutes * 60_000);
     if (slotStart < now) continue;
-    const overlaps = appointments.some((a) => slotStart < a.endsAt && slotEnd > a.startsAt);
-    if (!overlaps) {
+    const overlapsAppointment = appointments.some((a) => slotStart < a.endsAt && slotEnd > a.startsAt);
+    const overlapsBreak = breakStart && breakEnd && slotStart < breakEnd && slotEnd > breakStart;
+    if (!overlapsAppointment && !overlapsBreak) {
       slots.push(`${String(slotStart.getHours()).padStart(2, "0")}:${String(slotStart.getMinutes()).padStart(2, "0")}`);
     }
   }

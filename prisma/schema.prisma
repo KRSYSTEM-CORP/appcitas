@@ -139,6 +139,11 @@ model BusinessHour {
   opensAt    String?
   closesAt   String?
   isClosed   Boolean  @default(false)
+  // Optional single daily break (e.g. lunch) carved out of opensAt–closesAt —
+  // both null means no break that day. See getAvailableSlots in
+  // lib/actions/public.ts for how this is subtracted from the slot grid.
+  breakStart String?
+  breakEnd   String?
 
   @@unique([businessId, weekday])
 }
@@ -249,13 +254,16 @@ model SpecialistService {
 // in lib/actions/public.ts). Replaces BusinessHour entirely for that service
 // on the days it applies, rather than intersecting with it.
 model ServiceHour {
-  id        String  @id @default(cuid())
-  serviceId String
-  service   Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
-  weekday   Int
-  opensAt   String?
-  closesAt  String?
-  isClosed  Boolean @default(false)
+  id         String  @id @default(cuid())
+  serviceId  String
+  service    Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  weekday    Int
+  opensAt    String?
+  closesAt   String?
+  isClosed   Boolean @default(false)
+  // Same optional daily break as BusinessHour — see getAvailableSlots.
+  breakStart String?
+  breakEnd   String?
 
   @@unique([serviceId, weekday])
 }

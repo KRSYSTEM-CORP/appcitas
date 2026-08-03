@@ -1,9 +1,10 @@
 import Link from "next/link";
 import { buttonVariants } from "@/components/ui/button";
 import { AppointmentCard } from "@/components/agenda/AppointmentCard";
+import { DayTimeline } from "@/components/agenda/DayTimeline";
 import { listAppointmentsInRange } from "@/lib/actions/appointments";
 import { listActiveSpecialists } from "@/lib/actions/specialists";
-import { getFxInfo } from "@/lib/actions/business";
+import { getFxInfo, getBusinessHourForWeekday } from "@/lib/actions/business";
 import { requireSession } from "@/lib/session";
 import { formatDate, formatDayLabel, toDateKey } from "@/lib/format";
 import { RANGE_VIEWS, getRange, shiftDate, type RangeView } from "@/lib/date-range";
@@ -24,11 +25,13 @@ export default async function AgendaPage({
   const view: AgendaView = VIEWS.some((v) => v.key === viewParam) ? (viewParam as AgendaView) : "day";
 
   const { start, end } = getRange(view, dateKey);
+  const dayWeekday = new Date(`${dateKey}T00:00:00`).getDay();
 
-  const [appointments, specialists, fx] = await Promise.all([
+  const [appointments, specialists, fx, dayHours] = await Promise.all([
     listAppointmentsInRange(start, end),
     listActiveSpecialists(),
     getFxInfo(),
+    view === "day" ? getBusinessHourForWeekday(dayWeekday) : Promise.resolve(null),
   ]);
 
   const rangeLabel =
@@ -95,9 +98,11 @@ export default async function AgendaPage({
           para empezar a agendar citas.
         </p>
       ) : view === "day" ? (
-        <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(${specialists.length}, minmax(220px, 1fr))` }}>
-          {specialists.map((specialist) => {
-            const dayAppointments = appointments.filter((a) => a.specialist.id === specialist.id);
+        <div className="flex flex-col gap-4">
+          <DayTimeline specialists={specialists} appointments={appointments} hours={dayHours} />
+          <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(${specialists.length}, minmax(220px, 1fr))` }}>
+            {specialists.map((specialist) => {
+              const dayAppointments = appointments.filter((a) => a.specialist.id === specialist.id);
             return (
               <div key={specialist.id} className="flex flex-col gap-2">
                 <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
@@ -123,8 +128,9 @@ export default async function AgendaPage({
                   )}
                 </div>
               </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
       ) : appointments.length === 0 ? (
         <p className="text-sm text-muted-foreground py-8 text-center border border-dashed border-border rounded-md">

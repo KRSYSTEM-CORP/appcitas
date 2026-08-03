@@ -206,7 +206,14 @@ export async function bulkImportServices(rows: BulkServiceRow[]): Promise<BulkSe
   return { created, updated, failed };
 }
 
-export type ServiceHourItem = { weekday: number; isClosed: boolean; opensAt: string | null; closesAt: string | null };
+export type ServiceHourItem = {
+  weekday: number;
+  isClosed: boolean;
+  opensAt: string | null;
+  closesAt: string | null;
+  breakStart: string | null;
+  breakEnd: string | null;
+};
 
 const WEEKDAYS = [0, 1, 2, 3, 4, 5, 6];
 
@@ -224,8 +231,15 @@ export async function getServiceHours(
   const hours = WEEKDAYS.map((weekday) => {
     const h = byWeekday.get(weekday);
     return h
-      ? { weekday, isClosed: h.isClosed, opensAt: h.opensAt, closesAt: h.closesAt }
-      : { weekday, isClosed: false, opensAt: null, closesAt: null };
+      ? {
+          weekday,
+          isClosed: h.isClosed,
+          opensAt: h.opensAt,
+          closesAt: h.closesAt,
+          breakStart: h.breakStart,
+          breakEnd: h.breakEnd,
+        }
+      : { weekday, isClosed: false, opensAt: null, closesAt: null, breakStart: null, breakEnd: null };
   });
 
   return { hasCustomHours: service.hasCustomHours, hours };
@@ -259,11 +273,15 @@ export async function updateServiceHours(
           isClosed: h.isClosed,
           opensAt: h.isClosed ? null : h.opensAt || null,
           closesAt: h.isClosed ? null : h.closesAt || null,
+          breakStart: h.isClosed ? null : h.breakStart || null,
+          breakEnd: h.isClosed ? null : h.breakEnd || null,
         },
         update: {
           isClosed: h.isClosed,
           opensAt: h.isClosed ? null : h.opensAt || null,
           closesAt: h.isClosed ? null : h.closesAt || null,
+          breakStart: h.isClosed ? null : h.breakStart || null,
+          breakEnd: h.isClosed ? null : h.breakEnd || null,
         },
       }),
     ),

@@ -48,24 +48,54 @@ export function BusinessHoursForm({ initialHours }: { initialHours: BusinessConf
           </label>
 
           {!h.isClosed && (
-            <div className="flex items-center gap-2 text-sm">
-              <input
-                type="time"
-                value={h.opensAt ?? ""}
-                onChange={(e) => updateDay(h.weekday, { opensAt: e.target.value })}
-                className="rounded border border-input bg-background px-2 py-1 text-sm tabular-nums"
-              />
-              <span className="text-muted-foreground">a</span>
-              <input
-                type="time"
-                value={h.closesAt ?? ""}
-                onChange={(e) => updateDay(h.weekday, { closesAt: e.target.value })}
-                className="rounded border border-input bg-background px-2 py-1 text-sm tabular-nums"
-              />
-            </div>
+            <>
+              <div className="flex items-center gap-2 text-sm">
+                <input
+                  type="time"
+                  value={h.opensAt ?? ""}
+                  onChange={(e) => updateDay(h.weekday, { opensAt: e.target.value })}
+                  className="rounded border border-input bg-background px-2 py-1 text-sm tabular-nums"
+                />
+                <span className="text-muted-foreground">a</span>
+                <input
+                  type="time"
+                  value={h.closesAt ?? ""}
+                  onChange={(e) => updateDay(h.weekday, { closesAt: e.target.value })}
+                  className="rounded border border-input bg-background px-2 py-1 text-sm tabular-nums"
+                />
+              </div>
+              <div className="flex items-center gap-2 text-sm">
+                <span className="text-muted-foreground shrink-0">Descanso</span>
+                <input
+                  type="time"
+                  value={h.breakStart ?? ""}
+                  onChange={(e) => updateDay(h.weekday, { breakStart: e.target.value || null })}
+                  className="rounded border border-input bg-background px-2 py-1 text-sm tabular-nums"
+                />
+                <span className="text-muted-foreground">a</span>
+                <input
+                  type="time"
+                  value={h.breakEnd ?? ""}
+                  onChange={(e) => updateDay(h.weekday, { breakEnd: e.target.value || null })}
+                  className="rounded border border-input bg-background px-2 py-1 text-sm tabular-nums"
+                />
+                {h.breakStart && (
+                  <button
+                    type="button"
+                    onClick={() => updateDay(h.weekday, { breakStart: null, breakEnd: null })}
+                    className="text-xs text-muted-foreground underline underline-offset-2"
+                  >
+                    Quitar
+                  </button>
+                )}
+              </div>
+            </>
           )}
         </div>
       ))}
+      <p className="text-xs text-muted-foreground">
+        El descanso (ej. almuerzo) es opcional — déjalo vacío si el horario es continuo.
+      </p>
 
       {error && <p className="text-sm text-destructive">{error}</p>}
       {saved && !error && <p className="text-sm text-success">Horario guardado</p>}

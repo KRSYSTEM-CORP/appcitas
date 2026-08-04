@@ -3,6 +3,9 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
+import { dateKeyOf, zonedHM, zonedTimeToUtc } from "@/lib/timezone";
+import { getAvailableSlots } from "@/lib/actions/public";
+import { formatDayLabel } from "@/lib/format";
 import type { ActionResult } from "@/lib/types";
 import type { AppointmentStatus, PackagePaymentMode, PaymentMethod, Prisma } from "@prisma/client";
 
@@ -198,22 +201,31 @@ export async function createPackage(input: CreatePackageInput): Promise<ActionRe
   if (!specialist) return { success: false, error: "Especialista no válido" };
   if (!service) return { success: false, error: "Servicio no válido" };
 
-  const firstStart = new Date(`${input.dateKey}T${input.time}:00`);
+  const firstStart = zonedTimeToUtc(input.dateKey, input.time);
   if (Number.isNaN(firstStart.getTime())) return { success: false, error: "Fecha u hora inválidas" };
 
+  // Each session lands on its own calendar day (intervalDays >= 1), so no two
+  // sessions of the same package ever share a dateKey.
   const sessions = Array.from({ length: input.totalSessions }, (_, i) => {
     const startsAt = new Date(firstStart.getTime() + i * input.intervalDays * 24 * 60 * 60_000);
     return { startsAt, endsAt: new Date(startsAt.getTime() + service.durationMinutes * 60_000) };
   });
 
-  const conflict = await prisma.appointment.findFirst({
-    where: {
-      specialistId: specialist.id,
-      status: { notIn: ["CANCELLED", "NO_SHOW"] },
-      OR: sessions.map((s) => ({ startsAt: { lt: s.endsAt }, endsAt: { gt: s.startsAt } })),
-    },
-  });
-  if (conflict) return { success: false, error: "El especialista ya tiene una cita en uno de esos horarios" };
+  // Same free/busy + business-hours/break source the single-appointment
+  // picker and the public booking link use (getAvailableSlots) — reused here
+  // instead of a separate ad-hoc conflict query so a package can never book a
+  // session outside business hours, inside a break, or over an existing
+  // appointment, the way a single "Nueva cita" already can't.
+  for (const session of sessions) {
+    const sessionDateKey = dateKeyOf(session.startsAt);
+    const slots = await getAvailableSlots(businessId, specialist.id, service.id, sessionDateKey);
+    if (!slots.includes(zonedHM(session.startsAt))) {
+      return {
+        success: false,
+        error: `La sesión del ${formatDayLabel(session.startsAt)} a las ${zonedHM(session.startsAt)} cae fuera del horario de atención, coincide con un descanso o ya tiene una cita — ajusta la hora o el intervalo.`,
+      };
+    }
+  }
 
   let clientId = input.clientId;
   if (!clientId && input.newClient) {

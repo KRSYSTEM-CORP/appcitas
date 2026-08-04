@@ -32,6 +32,58 @@ export async function getClient(clientId: string): Promise<ClientListItem | null
   return prisma.client.findFirst({ where: { id: clientId, businessId, active: true } });
 }
 
+export type ClientCrmItem = ClientListItem & {
+  lastVisit: Date | null;
+  lastServiceName: string | null;
+  totalVisits: number;
+};
+
+// Powers /crm — who to reach out to for reactivation. A client is never
+// "attended" until an appointment is explicitly marked ATTENDED (see
+// AppointmentCard's status select), so a PENDING/CONFIRMED appointment
+// doesn't count as a real visit here even if it's in the past.
+export async function listClientsForCrm(): Promise<ClientCrmItem[]> {
+  const { businessId } = await requireSession();
+  const [clients, attended] = await Promise.all([
+    prisma.client.findMany({ where: { businessId, active: true } }),
+    prisma.appointment.findMany({
+      where: { businessId, status: "ATTENDED" },
+      select: { clientId: true, startsAt: true, service: { select: { name: true } } },
+      orderBy: { startsAt: "desc" },
+    }),
+  ]);
+
+  const lastByClient = new Map<string, { startsAt: Date; serviceName: string }>();
+  const visitCounts = new Map<string, number>();
+  for (const a of attended) {
+    visitCounts.set(a.clientId, (visitCounts.get(a.clientId) ?? 0) + 1);
+    // attended is ordered startsAt desc, so the first hit per client is its
+    // most recent visit.
+    if (!lastByClient.has(a.clientId)) {
+      lastByClient.set(a.clientId, { startsAt: a.startsAt, serviceName: a.service.name });
+    }
+  }
+
+  return clients
+    .map((c) => {
+      const last = lastByClient.get(c.id);
+      return {
+        ...c,
+        lastVisit: last?.startsAt ?? null,
+        lastServiceName: last?.serviceName ?? null,
+        totalVisits: visitCounts.get(c.id) ?? 0,
+      };
+    })
+    .sort((a, b) => {
+      // Never-visited clients surface first, then longest-absent — these are
+      // the ones most worth a reactivation message.
+      if (a.lastVisit === null && b.lastVisit === null) return 0;
+      if (a.lastVisit === null) return -1;
+      if (b.lastVisit === null) return 1;
+      return a.lastVisit.getTime() - b.lastVisit.getTime();
+    });
+}
+
 function parseClientForm(formData: FormData) {
   return ClientSchema.safeParse({
     firstName: formData.get("firstName"),

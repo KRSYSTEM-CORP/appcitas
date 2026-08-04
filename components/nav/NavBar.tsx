@@ -14,6 +14,7 @@ const baseLinks = [
 
 const ownerLinks = [
   { href: "/clients", label: "Clientes" },
+  { href: "/crm", label: "CRM" },
   { href: "/services", label: "Servicios" },
   { href: "/specialists", label: "Especialistas" },
   { href: "/reports", label: "Reportes" },

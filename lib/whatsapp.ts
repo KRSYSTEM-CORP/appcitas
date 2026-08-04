@@ -40,3 +40,28 @@ export function buildWhatsAppConfirmationLink(input: {
     `¡Te esperamos!`;
   return `https://wa.me/${digits}?text=${encodeURIComponent(message)}`;
 }
+
+// CRM reactivation message — same manual wa.me pattern as the reminder and
+// confirmation links above, opened for staff to review and send themselves
+// rather than fired automatically. lastServiceName/lastVisit are omitted for
+// a client with no attended appointment yet (see listClientsForCrm).
+export function buildWhatsAppPromoLink(input: {
+  phone: string;
+  clientName: string;
+  businessName: string;
+  lastServiceName?: string | null;
+  lastVisit?: Date | null;
+  bookingUrl?: string;
+}): string {
+  const digits = input.phone.replace(/\D/g, "");
+  const intro =
+    input.lastServiceName && input.lastVisit
+      ? `Notamos que tu última visita fue el ${formatDayLabel(input.lastVisit)} para ${input.lastServiceName} y nos encantaría atenderte de nuevo.`
+      : "Queríamos saludarte y contarte que nos encantaría atenderte.";
+  const message =
+    `Hola ${input.clientName}, te saluda ${input.businessName}. ${intro} ` +
+    `Seguimos aquí para servirte con todos nuestros servicios` +
+    (input.bookingUrl ? ` — puedes agendar tu próxima cita aquí: ${input.bookingUrl}` : ", ¡escríbenos para agendar!") +
+    ` ¡Será un gusto recibirte pronto!`;
+  return `https://wa.me/${digits}?text=${encodeURIComponent(message)}`;
+}

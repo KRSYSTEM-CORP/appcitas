@@ -11,11 +11,11 @@ import { PAYMENT_METHODS_REQUIRING_REFERENCE } from "@/lib/validations";
 import { resizeImageToDataUrl } from "@/lib/image-utils";
 import type { PaymentMethod } from "@prisma/client";
 
-// The subscription only accepts these two rails now — no more cash, card,
-// Binance, etc. for paying KR System itself (this restriction is specific to
-// this billing report, not the general PAYMENT_METHOD_LABELS used elsewhere
-// for a business' own service payments).
-const BILLING_PAYMENT_METHODS: PaymentMethod[] = ["TRANSFER", "PAGO_MOVIL"];
+// The subscription only accepts this one rail now — no more cash, card,
+// Transferencia, Pago Móvil, etc. for paying KR System itself (this
+// restriction is specific to this billing report, not the general
+// PAYMENT_METHOD_LABELS used elsewhere for a business' own service payments).
+const BILLING_PAYMENT_METHODS: PaymentMethod[] = ["BINANCE"];
 
 type ReportLine = { paymentMethod: PaymentMethod; amount: string; reference: string };
 
@@ -24,7 +24,7 @@ const MAX_DIMENSION = 1400;
 export function PaymentReportForm() {
   const [isPending, startTransition] = useTransition();
   const router = useRouter();
-  const [lines, setLines] = useState<ReportLine[]>([{ paymentMethod: "TRANSFER", amount: "", reference: "" }]);
+  const [lines, setLines] = useState<ReportLine[]>([{ paymentMethod: "BINANCE", amount: "", reference: "" }]);
   const [proofImageDataUrl, setProofImageDataUrl] = useState("");
   const [note, setNote] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -37,7 +37,7 @@ export function PaymentReportForm() {
   }
 
   function addLine() {
-    setLines((prev) => [...prev, { paymentMethod: "TRANSFER", amount: "", reference: "" }]);
+    setLines((prev) => [...prev, { paymentMethod: "BINANCE", amount: "", reference: "" }]);
   }
 
   function removeLine(i: number) {
@@ -77,7 +77,7 @@ export function PaymentReportForm() {
         setError(result.error);
         return;
       }
-      setLines([{ paymentMethod: "TRANSFER", amount: "", reference: "" }]);
+      setLines([{ paymentMethod: "BINANCE", amount: "", reference: "" }]);
       setProofImageDataUrl("");
       setNote("");
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -136,7 +136,7 @@ export function PaymentReportForm() {
       ))}
 
       <Button type="button" size="sm" variant="outline" onClick={addLine}>
-        + Agregar otro método de pago
+        + Agregar otro pago
       </Button>
 
       <div className="flex flex-col gap-1.5">
@@ -174,7 +174,7 @@ export function PaymentReportForm() {
             setNote(e.target.value);
             setSubmitted(false);
           }}
-          placeholder="Ej. Pagué el 15 de julio por transferencia"
+          placeholder="Ej. Pagué el 15 de julio por Binance"
         />
       </div>
 

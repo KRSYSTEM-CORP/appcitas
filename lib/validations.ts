@@ -229,6 +229,8 @@ export const RejectPaymentReportSchema = z.object({
 
 export const PlatformSettingsSchema = z.object({
   paymentInstructions: z.preprocess(blankToUndefined, z.string().trim().optional()),
+  binanceQrDataUrl: z.preprocess(blankToUndefined, z.string().trim().optional()),
+  binanceId: z.preprocess(blankToUndefined, z.string().trim().optional()),
   billingExchangeRate: z.coerce.number().positive("La tasa debe ser mayor a 0").optional(),
   defaultMonthlyFee: z.preprocess(
     blankToUndefined,

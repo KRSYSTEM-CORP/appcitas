@@ -530,10 +530,20 @@ model PagoMovilOrder {
 // same as User/Business.
 model PlatformSettings {
   id                        String   @id
+  // Extra free-text notes shown under the Binance details below (e.g. "solo
+  // horario laboral", "confirma por WhatsApp antes de enviar") — the QR/ID
+  // pair are the actual payment instructions now, this is just supplementary.
   paymentInstructions       String?  @db.Text
+  // Binance Pay QR code, shown on /billing so a business can scan it to pay
+  // the subscription — same base64 data-URL pattern as Business.logoDataUrl,
+  // uploaded via PlatformSettingsForm (resizeImageToDataUrl).
+  binanceQrDataUrl          String?  @db.Text
+  // Binance Pay ID / UID, shown alongside the QR as a manual fallback for
+  // whoever can't scan it.
+  binanceId                 String?
   // Platform-wide Bs/USD rate, used only to preview the bolívar equivalent
-  // for VES businesses (who typically pay via Pago Móvil); every other
-  // business just pays the USD amount directly via Binance/transferencia.
+  // for VES businesses — the subscription itself is only ever paid in USDT
+  // via Binance, this is just a heads-up of what that comes out to in Bs.
   billingExchangeRate       Decimal? @db.Decimal(12, 4)
   // Applied to Business.monthlyFeeUsdCents automatically when a super admin
   // approves a new signup and leaves the fee field blank (see approveBusiness

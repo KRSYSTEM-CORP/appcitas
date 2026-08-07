@@ -39,6 +39,8 @@ export default async function AdminPage() {
         <h2 className="text-lg font-semibold">Cobro de suscripción mensual</h2>
         <PlatformSettingsForm
           initialInstructions={platformSettings.paymentInstructions}
+          initialBinanceQrDataUrl={platformSettings.binanceQrDataUrl}
+          initialBinanceId={platformSettings.binanceId}
           initialBillingExchangeRate={platformSettings.billingExchangeRate}
           initialDefaultMonthlyFeeUsdCents={platformSettings.defaultMonthlyFeeUsdCents}
         />

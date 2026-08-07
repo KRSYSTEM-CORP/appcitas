@@ -33,6 +33,8 @@ export type BillingInfo = {
   nextPaymentDueDate: Date | null;
   blocked: boolean;
   paymentInstructions: string | null;
+  binanceQrDataUrl: string | null;
+  binanceId: string | null;
 };
 
 export async function getBillingInfo(): Promise<BillingInfo> {
@@ -63,6 +65,8 @@ export async function getBillingInfo(): Promise<BillingInfo> {
     nextPaymentDueDate,
     blocked: isBusinessBlocked({ isExempt, nextPaymentDueDate }),
     paymentInstructions: settings?.paymentInstructions ?? null,
+    binanceQrDataUrl: settings?.binanceQrDataUrl ?? null,
+    binanceId: settings?.binanceId ?? null,
   };
 }
 

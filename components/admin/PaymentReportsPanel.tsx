@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { PaymentMethod } from "@prisma/client";
 import { Button } from "@/components/ui/button";
@@ -8,6 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { formatDate, formatMoney, PAYMENT_METHOD_LABELS } from "@/lib/format";
+import { resizeImageToDataUrl } from "@/lib/image-utils";
 import {
   approvePaymentReport,
   rejectPaymentReport,
@@ -33,16 +34,22 @@ type PendingReport = {
 
 export function PlatformSettingsForm({
   initialInstructions,
+  initialBinanceQrDataUrl,
+  initialBinanceId,
   initialBillingExchangeRate,
   initialDefaultMonthlyFeeUsdCents,
 }: {
   initialInstructions: string | null;
+  initialBinanceQrDataUrl: string | null;
+  initialBinanceId: string | null;
   initialBillingExchangeRate: number | null;
   initialDefaultMonthlyFeeUsdCents: number | null;
 }) {
   const [isPending, startTransition] = useTransition();
   const router = useRouter();
   const [instructions, setInstructions] = useState(initialInstructions ?? "");
+  const [binanceQrDataUrl, setBinanceQrDataUrl] = useState(initialBinanceQrDataUrl ?? "");
+  const [binanceId, setBinanceId] = useState(initialBinanceId ?? "");
   const [rate, setRate] = useState(initialBillingExchangeRate != null ? String(initialBillingExchangeRate) : "");
   const [defaultFee, setDefaultFee] = useState(
     initialDefaultMonthlyFeeUsdCents != null ? String(initialDefaultMonthlyFeeUsdCents / 100) : ""
@@ -51,6 +58,19 @@ export function PlatformSettingsForm({
   const [saved, setSaved] = useState(false);
   const [isFetchingBcv, startBcvFetch] = useTransition();
   const [bcvError, setBcvError] = useState<string | null>(null);
+  const qrInputRef = useRef<HTMLInputElement>(null);
+
+  async function handleQrFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const dataUrl = await resizeImageToDataUrl(file, { maxDimension: 600, format: "image/png" });
+      setBinanceQrDataUrl(dataUrl);
+      setSaved(false);
+    } catch {
+      setError("No se pudo procesar la imagen. Intenta con otro archivo.");
+    }
+  }
 
   function handleFetchBcv() {
     setBcvError(null);
@@ -73,6 +93,8 @@ export function PlatformSettingsForm({
     startTransition(async () => {
       const result = await updatePlatformSettings({
         paymentInstructions: instructions,
+        binanceQrDataUrl,
+        binanceId,
         billingExchangeRate: rate,
         defaultMonthlyFee: defaultFee,
       });
@@ -138,7 +160,43 @@ export function PlatformSettingsForm({
         </p>
       </div>
       <div className="flex flex-col gap-1.5">
-        <Label htmlFor="platform-instructions">Instrucciones de pago</Label>
+        <Label>QR de Binance Pay</Label>
+        <div className="flex items-center gap-3">
+          {binanceQrDataUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={binanceQrDataUrl}
+              alt="QR de Binance Pay"
+              className="h-20 w-20 rounded object-cover border"
+            />
+          ) : (
+            <div className="h-20 w-20 rounded border flex items-center justify-center text-xs text-muted-foreground text-center">
+              Sin QR
+            </div>
+          )}
+          <input
+            ref={qrInputRef}
+            type="file"
+            accept="image/*"
+            onChange={handleQrFileChange}
+            className="text-sm"
+          />
+        </div>
+      </div>
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="platform-binance-id">ID de la cuenta de Binance</Label>
+        <Input
+          id="platform-binance-id"
+          value={binanceId}
+          onChange={(e) => {
+            setBinanceId(e.target.value);
+            setSaved(false);
+          }}
+          placeholder="Ej. 123456789"
+        />
+      </div>
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="platform-instructions">Notas adicionales (opcional)</Label>
         <Textarea
           id="platform-instructions"
           value={instructions}
@@ -147,7 +205,7 @@ export function PlatformSettingsForm({
             setSaved(false);
           }}
           rows={4}
-          placeholder="Ej. Transferencia: Banco XXX, Teléfono 0412-1234567, RIF J-12345678-9, Titular: KR System C.A."
+          placeholder="Ej. Solo en horario laboral, confirma por WhatsApp antes de enviar"
         />
       </div>
       {error && <p className="text-sm text-destructive">{error}</p>}

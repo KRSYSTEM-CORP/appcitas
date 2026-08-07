@@ -2,15 +2,31 @@
 
 import { useEffect, useState, useTransition } from "react";
 import Link from "next/link";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { login, getBusinessBrandingByEmail, type BusinessBranding } from "@/lib/actions/auth";
 import { deriveBrandVars, BRAND_VAR_NAMES } from "@/lib/theme-color";
+import { GoogleIcon } from "@/components/auth/GoogleIcon";
 
 const NO_BRANDING: BusinessBranding = { logoDataUrl: null, brandColor: null, brandBackground: null };
 
-export function LoginForm() {
+const GOOGLE_ERRORS: Record<string, string> = {
+  google_no_configurado: "El inicio de sesión con Google no está configurado todavía.",
+  google_cancelado: "Cancelaste el inicio de sesión con Google.",
+  google_estado_invalido: "El enlace de Google expiró o no es válido. Intenta de nuevo.",
+  google_fallo: "Google no pudo confirmar tu cuenta. Intenta de nuevo.",
+  cuenta_pendiente: "Tu cuenta está pendiente de aprobación.",
+  cuenta_suspendida: "Tu acceso está suspendido.",
+};
+
+export function LoginForm({
+  googleConfigured = false,
+  authError,
+}: {
+  googleConfigured?: boolean;
+  authError?: string;
+}) {
   const [error, setError] = useState<string | null>(null);
   const [branding, setBranding] = useState<BusinessBranding>(NO_BRANDING);
   const [isPending, startTransition] = useTransition();
@@ -51,7 +67,24 @@ export function LoginForm() {
   }
 
   return (
-    <form action={handleSubmit} className="flex flex-col gap-4 max-w-sm mx-auto">
+    <div className="flex flex-col gap-4 max-w-sm mx-auto">
+      {authError && GOOGLE_ERRORS[authError] && (
+        <p className="text-sm text-destructive text-center">{GOOGLE_ERRORS[authError]}</p>
+      )}
+
+      {googleConfigured && (
+        <>
+          <a href="/api/auth/google/start" className={buttonVariants({ variant: "outline", size: "lg" })}>
+            <GoogleIcon />
+            Continuar con Google
+          </a>
+          <div className="flex items-center gap-3 text-xs text-muted-foreground">
+            <div className="h-px flex-1 bg-border" />o<div className="h-px flex-1 bg-border" />
+          </div>
+        </>
+      )}
+
+      <form action={handleSubmit} className="flex flex-col gap-4">
       {branding.logoDataUrl && (
         <div className="flex justify-center">
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -82,6 +115,7 @@ export function LoginForm() {
       <Button type="submit" disabled={isPending} size="lg">
         {isPending ? "Entrando..." : "Iniciar sesión"}
       </Button>
+      </form>
 
       <p className="text-sm text-muted-foreground text-center">
         ¿No tienes cuenta?{" "}
@@ -89,6 +123,6 @@ export function LoginForm() {
           Crea una
         </Link>
       </p>
-    </form>
+    </div>
   );
 }

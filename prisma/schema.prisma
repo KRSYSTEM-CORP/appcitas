@@ -158,7 +158,13 @@ model User {
   email        String?    @unique
   firstName    String
   lastName     String
-  passwordHash String
+  // Null for an account that only ever signed up/logged in with Google (see
+  // app/api/auth/google/callback) — nothing to verify a password against.
+  passwordHash String?
+  // Google's stable per-account id ("sub" claim) — set the first time this
+  // person uses "Continuar con Google", whether that creates a brand-new
+  // business or links onto an existing email/password account.
+  googleId     String?    @unique
   role         Role       @default(OWNER)
   status       UserStatus @default(ACTIVE)
   // Platform-level administrator (not tied to any one business) — can

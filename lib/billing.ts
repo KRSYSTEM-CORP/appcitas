@@ -1,8 +1,11 @@
 const GRACE_DAYS = 5;
 
-// Free trial granted automatically the moment a super admin approves a new
-// signup (see approveBusiness in lib/actions/admin.ts) — not from signup()
-// time itself, since the account can't do anything until approved anyway.
+// Free trial granted automatically the moment a new business is created —
+// signup() and the Google signup path (app/api/auth/google/callback) both go
+// through createBusinessWithOwner (lib/business-provisioning.ts), which is
+// where this actually gets applied. approveBusiness in lib/actions/admin.ts
+// still applies it too, purely to cover any pre-existing PENDING account
+// from before self-serve signup — new signups never reach PENDING anymore.
 export const TRIAL_DAYS = 14;
 
 // Fallback used only if a platform admin has never set PlatformSettings.

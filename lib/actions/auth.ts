@@ -1,12 +1,12 @@
 "use server";
 
-import { randomInt, randomBytes, createHash } from "crypto";
+import { randomBytes, createHash } from "crypto";
 import { redirect } from "next/navigation";
-import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { hashPassword, verifyPassword } from "@/lib/password";
 import { setSessionCookie, clearSessionCookie } from "@/lib/session";
 import { sendPasswordResetEmail } from "@/lib/email";
+import { createBusinessWithOwner } from "@/lib/business-provisioning";
 import {
   LoginSchema,
   RequestPasswordResetSchema,
@@ -21,18 +21,10 @@ function hashResetToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
 
-// Excludes visually ambiguous characters (0/O, 1/I) since staff will be
-// reading this off a screen or a note to type it in themselves.
-const LOGIN_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-
-function generateLoginCode(): string {
-  let code = "";
-  for (let i = 0; i < 6; i++) {
-    code += LOGIN_CODE_ALPHABET[randomInt(LOGIN_CODE_ALPHABET.length)];
-  }
-  return code;
-}
-
+// Self-serve: the business is active immediately, with a free trial (see
+// createBusinessWithOwner/lib/billing.ts) — no super admin approval step.
+// Auto-logs in and lands straight on /settings, the same way the Google
+// signup path (app/api/auth/google/callback) does.
 export async function signup(formData: FormData): Promise<ActionResult> {
   const parsed = SignupSchema.safeParse({
     businessName: formData.get("businessName"),
@@ -59,56 +51,14 @@ export async function signup(formData: FormData): Promise<ActionResult> {
   }
 
   const passwordHash = hashPassword(password);
+  const { business, user } = await createBusinessWithOwner(
+    businessName,
+    { email, passwordHash, firstName: businessName, lastName: "" },
+    subdomain,
+  );
 
-  // loginCode is the short code staff will later use (with their name +
-  // password) to log in without an email; collisions are astronomically
-  // unlikely (33^6 possibilities) but retried a few times just in case.
-  for (let attempt = 0; attempt < 5; attempt++) {
-    try {
-      await prisma.$transaction(async (tx) => {
-        const business = await tx.business.create({
-          data: {
-            name: businessName,
-            subdomain,
-            loginCode: generateLoginCode(),
-            // Sensible salon-style default: Mon-Fri 9-18, Sat 9-13, Sun closed.
-            // The owner adjusts these from Settings once signed in.
-            businessHours: {
-              create: [0, 1, 2, 3, 4, 5, 6].map((weekday) => ({
-                weekday,
-                isClosed: weekday === 0,
-                opensAt: weekday === 0 ? null : "09:00",
-                closesAt: weekday === 0 ? null : weekday === 6 ? "13:00" : "18:00",
-              })),
-            },
-          },
-        });
-        return tx.user.create({
-          data: {
-            email,
-            passwordHash,
-            businessId: business.id,
-            firstName: businessName,
-            lastName: "",
-            role: "OWNER",
-            // Awaiting a super admin's approval — see requireSuperAdmin() and
-            // app/(app)/admin. No session is created here; the owner can't
-            // log in until approved.
-            status: "PENDING",
-          },
-        });
-      });
-      return { success: true };
-    } catch (err) {
-      const isLoginCodeCollision =
-        err instanceof Prisma.PrismaClientKnownRequestError &&
-        err.code === "P2002" &&
-        (err.meta?.target as string[] | undefined)?.includes("loginCode");
-      if (!isLoginCodeCollision) throw err;
-    }
-  }
-
-  return { success: false, error: "No se pudo crear el negocio, intenta de nuevo" };
+  await setSessionCookie({ uid: user.id, bid: business.id, businessName: business.name });
+  redirect("/settings");
 }
 
 export async function login(formData: FormData): Promise<ActionResult> {
@@ -128,7 +78,10 @@ export async function login(formData: FormData): Promise<ActionResult> {
     where: { email },
     include: { business: true },
   });
-  if (!user || !verifyPassword(password, user.passwordHash)) {
+  // user.passwordHash is null on an account that only ever signed up with
+  // Google (see app/api/auth/google/callback) — a password attempt against
+  // it must fail the same generic way as a non-existent email, not throw.
+  if (!user || !user.passwordHash || !verifyPassword(password, user.passwordHash)) {
     return { success: false, error: genericError };
   }
 

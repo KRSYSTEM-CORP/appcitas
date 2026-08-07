@@ -99,11 +99,15 @@ export async function sendAnnouncement(input: unknown): Promise<SendAnnouncement
   return { success: true, sent, total: recipients.length };
 }
 
-// Approving a pending business also starts its first billing cycle in the
-// same step: a TRIAL_DAYS-day free trial from today, priced at the
-// platform's standard fee — no manual billing input needed for the common
-// case (see lib/billing.ts). A business that needs a different price later
-// can be adjusted from its "Registrar pago" action below.
+// Signup is self-serve now (see createBusinessWithOwner in
+// lib/business-provisioning.ts) — a new business is ACTIVE with its trial
+// running from the moment it's created, no approval needed. This stays only
+// to let a super admin manually reactivate/re-price a PENDING account from
+// before that change (or any created directly in the DB). Approving also
+// starts its first billing cycle in the same step: a TRIAL_DAYS-day free
+// trial from today, priced at the platform's standard fee — a business that
+// needs a different price later can be adjusted from its "Registrar pago"
+// action below.
 export async function approveBusiness(userId: string): Promise<ActionResult> {
   await requireSuperAdmin();
 

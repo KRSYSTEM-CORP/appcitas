@@ -2,8 +2,14 @@ import { LoginForm } from "@/components/auth/LoginForm";
 import { WelcomeModal } from "@/components/auth/WelcomeModal";
 import { SiteFooter } from "@/components/layout/SiteFooter";
 import { WHATSAPP_URL } from "@/lib/legal";
+import { googleOAuthConfigured } from "@/lib/google-oauth";
 
-export default function LoginPage() {
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ error?: string }>;
+}) {
+  const { error } = await searchParams;
   return (
     <div className="flex flex-col min-h-full bg-gradient-to-b from-secondary/50 via-background to-background">
       <WelcomeModal />
@@ -18,7 +24,7 @@ export default function LoginPage() {
             <p className="text-sm text-muted-foreground mt-1">KR Citas — agenda y reservas</p>
           </div>
         </div>
-        <LoginForm />
+        <LoginForm googleConfigured={googleOAuthConfigured()} authError={error} />
         <p className="text-center text-sm text-muted-foreground">
           ¿Quieres este sistema para tu negocio o más información?{" "}
           <a

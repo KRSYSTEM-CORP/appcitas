@@ -1,14 +1,13 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { fetchBcvRate } from "@/lib/bcv-rate";
-import { PLATFORM_SETTINGS_ID } from "@/lib/billing";
 
 // Runs once a day at 00:00 Venezuela time (04:00 UTC — Vercel cron schedules
 // always run in UTC, see vercel.json's "crons" entry) and refreshes every
-// FX-enabled VES business's exchange rate automatically. Also refreshes
-// PlatformSettings.billingExchangeRate, the separate platform-wide USD/VES
-// rate used to price each business's subscription in /billing — subscriptions
-// are always USD, so it always takes the USD leg. Vercel signs its own cron
+// FX-enabled VES business's exchange rate automatically. This is purely the
+// business's own retail rate (for pricing appointments/services in Bs) — the
+// platform subscription itself is always paid in USDT via Binance, so there's
+// no platform-wide rate to refresh here anymore. Vercel signs its own cron
 // requests with `Authorization: Bearer $CRON_SECRET` once that env var is
 // set on the project, which is what's checked below.
 export async function GET(request: NextRequest) {
@@ -39,16 +38,6 @@ export async function GET(request: NextRequest) {
     updated++;
   }
 
-  let platformUpdated = false;
-  if (usdRate.status === "fulfilled") {
-    await prisma.platformSettings.upsert({
-      where: { id: PLATFORM_SETTINGS_ID },
-      create: { id: PLATFORM_SETTINGS_ID, billingExchangeRate: usdRate.value },
-      update: { billingExchangeRate: usdRate.value },
-    });
-    platformUpdated = true;
-  }
-
   return NextResponse.json({
     ok: true,
     usdRate: usdRate.status === "fulfilled" ? usdRate.value : null,
@@ -56,6 +45,5 @@ export async function GET(request: NextRequest) {
     total: businesses.length,
     updated,
     skipped,
-    platformUpdated,
   });
 }

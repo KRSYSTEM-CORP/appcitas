@@ -21,16 +21,6 @@ const STATUS_STYLES: Record<PaymentReportStatus, string> = {
 export default async function BillingPage() {
   const [info, reports] = await Promise.all([getBillingInfo(), listMyPaymentReports()]);
 
-  // The Bs equivalent is only shown here as a heads-up for VES businesses —
-  // the subscription is only ever paid in USDT via Binance, so this is just
-  // informational; the headline "cost" is always the USD amount, and the
-  // actual Bs figure used when a report is approved is computed from
-  // whatever the platform rate is at that moment, not frozen here.
-  const previewBs =
-    info.localCurrencyCode === "VES" && info.monthlyFeeUsdCents != null && info.billingExchangeRate != null
-      ? (info.monthlyFeeUsdCents / 100) * info.billingExchangeRate
-      : null;
-
   return (
     <div className="flex flex-col gap-6 p-6 max-w-4xl mx-auto w-full">
       <div>
@@ -57,11 +47,6 @@ export default async function BillingPage() {
             {info.monthlyFeeUsdCents != null ? (
               <>
                 <span className="text-2xl font-semibold">{formatMoney(info.monthlyFeeUsdCents, "USD")}</span>
-                {previewBs != null && (
-                  <span className="text-xs text-muted-foreground">
-                    ≈ {formatMoney(previewBs * 100, info.localCurrencyCode)} a la tasa vigente
-                  </span>
-                )}
               </>
             ) : (
               <span className="text-sm text-muted-foreground">
@@ -114,12 +99,6 @@ export default async function BillingPage() {
       {!info.isExempt && (
         <div className="rounded-md border border-border bg-card p-4 flex flex-col gap-3">
           <h2 className="text-sm font-semibold">Reportar pago</h2>
-          {previewBs != null && (
-            <p className="text-sm text-muted-foreground">
-              Monto aproximado en bolívares a la tasa vigente:{" "}
-              <span className="font-medium">{formatMoney(previewBs * 100, info.localCurrencyCode)}</span>
-            </p>
-          )}
           <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 flex flex-col gap-2">
             <p className="text-sm font-medium">Pasos obligatorios para activar tu suscripción:</p>
             <ol className="text-sm text-muted-foreground list-decimal list-inside flex flex-col gap-1">

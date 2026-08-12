@@ -4,7 +4,6 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireSuperAdmin } from "@/lib/session";
 import { sendAnnouncementEmail } from "@/lib/email";
-import { fetchBcvRate } from "@/lib/bcv-rate";
 import {
   PLATFORM_SETTINGS_ID,
   TRIAL_DAYS,
@@ -221,17 +220,11 @@ export async function recordMaintenancePayment(businessId: string, input: unknow
     return { success: false, error: parsed.error.issues[0]?.message ?? "Datos de pago inválidos" };
   }
 
-  const settings = await prisma.platformSettings.findUnique({ where: { id: PLATFORM_SETTINGS_ID } });
-  if (settings?.billingExchangeRate == null) {
-    return { success: false, error: "Configura la tasa de cambio de la plataforma primero" };
-  }
-
   await prisma.$transaction([
     prisma.payment.create({
       data: {
         businessId,
         amountUsdCents: parsed.data.amount,
-        exchangeRate: settings.billingExchangeRate,
         periodEnd: parsed.data.periodEnd,
         note: parsed.data.note,
         verifiedById: session.userId,
@@ -285,11 +278,6 @@ export async function approvePaymentReport(reportId: string): Promise<ActionResu
     return { success: false, error: "El reporte no tiene métodos de pago" };
   }
 
-  const settings = await prisma.platformSettings.findUnique({ where: { id: PLATFORM_SETTINGS_ID } });
-  if (settings?.billingExchangeRate == null) {
-    return { success: false, error: "Configura la tasa de cambio de la plataforma primero" };
-  }
-
   const business = await prisma.business.findUnique({ where: { id: report.businessId } });
   if (!business) {
     return { success: false, error: "Negocio no encontrado" };
@@ -306,7 +294,6 @@ export async function approvePaymentReport(reportId: string): Promise<ActionResu
       data: {
         businessId: report.businessId,
         amountUsdCents: totalUsdCents,
-        exchangeRate: settings.billingExchangeRate,
         periodEnd,
         note: report.note ? `Reportado por el usuario: ${report.note}` : "Reportado por el usuario",
         verifiedById: session.userId,
@@ -354,7 +341,6 @@ export async function getPlatformSettings(): Promise<{
   paymentInstructions: string | null;
   binanceQrDataUrl: string | null;
   binanceId: string | null;
-  billingExchangeRate: number | null;
   defaultMonthlyFeeUsdCents: number | null;
 }> {
   await requireSuperAdmin();
@@ -363,7 +349,6 @@ export async function getPlatformSettings(): Promise<{
     paymentInstructions: settings?.paymentInstructions ?? null,
     binanceQrDataUrl: settings?.binanceQrDataUrl ?? null,
     binanceId: settings?.binanceId ?? null,
-    billingExchangeRate: settings?.billingExchangeRate != null ? Number(settings.billingExchangeRate) : null,
     defaultMonthlyFeeUsdCents: settings?.defaultMonthlyFeeUsdCents ?? null,
   };
 }
@@ -382,14 +367,12 @@ export async function updatePlatformSettings(input: unknown): Promise<ActionResu
       paymentInstructions: parsed.data.paymentInstructions,
       binanceQrDataUrl: parsed.data.binanceQrDataUrl,
       binanceId: parsed.data.binanceId,
-      billingExchangeRate: parsed.data.billingExchangeRate,
       defaultMonthlyFeeUsdCents: parsed.data.defaultMonthlyFee,
     },
     update: {
       paymentInstructions: parsed.data.paymentInstructions,
       binanceQrDataUrl: parsed.data.binanceQrDataUrl,
       binanceId: parsed.data.binanceId,
-      billingExchangeRate: parsed.data.billingExchangeRate,
       defaultMonthlyFeeUsdCents: parsed.data.defaultMonthlyFee,
     },
   });
@@ -397,31 +380,4 @@ export async function updatePlatformSettings(input: unknown): Promise<ActionResu
   revalidatePath("/admin");
   revalidatePath("/billing");
   return { success: true };
-}
-
-// Same BCV source the per-business "Actualizar con tasa BCV" button uses
-// (lib/actions/business.ts), but for the platform's own USD/VES billing
-// rate — subscriptions are always priced in USD regardless of each
-// business's own reference currency, so this always fetches the USD leg.
-export async function fetchAndUpdatePlatformBcvRate(): Promise<
-  { success: true; rate: number } | { success: false; error: string }
-> {
-  await requireSuperAdmin();
-
-  let rate: number;
-  try {
-    rate = await fetchBcvRate("USD");
-  } catch {
-    return { success: false, error: "No se pudo consultar la tasa del BCV. Intenta de nuevo." };
-  }
-
-  await prisma.platformSettings.upsert({
-    where: { id: PLATFORM_SETTINGS_ID },
-    create: { id: PLATFORM_SETTINGS_ID, billingExchangeRate: rate },
-    update: { billingExchangeRate: rate },
-  });
-
-  revalidatePath("/admin");
-  revalidatePath("/billing");
-  return { success: true, rate };
 }

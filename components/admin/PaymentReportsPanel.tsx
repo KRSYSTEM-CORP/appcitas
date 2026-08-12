@@ -9,12 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { formatDate, formatMoney, PAYMENT_METHOD_LABELS } from "@/lib/format";
 import { resizeImageToDataUrl } from "@/lib/image-utils";
-import {
-  approvePaymentReport,
-  rejectPaymentReport,
-  updatePlatformSettings,
-  fetchAndUpdatePlatformBcvRate,
-} from "@/lib/actions/admin";
+import { approvePaymentReport, rejectPaymentReport, updatePlatformSettings } from "@/lib/actions/admin";
 
 type PendingReportLine = {
   paymentMethod: PaymentMethod;
@@ -36,13 +31,11 @@ export function PlatformSettingsForm({
   initialInstructions,
   initialBinanceQrDataUrl,
   initialBinanceId,
-  initialBillingExchangeRate,
   initialDefaultMonthlyFeeUsdCents,
 }: {
   initialInstructions: string | null;
   initialBinanceQrDataUrl: string | null;
   initialBinanceId: string | null;
-  initialBillingExchangeRate: number | null;
   initialDefaultMonthlyFeeUsdCents: number | null;
 }) {
   const [isPending, startTransition] = useTransition();
@@ -50,14 +43,11 @@ export function PlatformSettingsForm({
   const [instructions, setInstructions] = useState(initialInstructions ?? "");
   const [binanceQrDataUrl, setBinanceQrDataUrl] = useState(initialBinanceQrDataUrl ?? "");
   const [binanceId, setBinanceId] = useState(initialBinanceId ?? "");
-  const [rate, setRate] = useState(initialBillingExchangeRate != null ? String(initialBillingExchangeRate) : "");
   const [defaultFee, setDefaultFee] = useState(
     initialDefaultMonthlyFeeUsdCents != null ? String(initialDefaultMonthlyFeeUsdCents / 100) : ""
   );
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
-  const [isFetchingBcv, startBcvFetch] = useTransition();
-  const [bcvError, setBcvError] = useState<string | null>(null);
   const qrInputRef = useRef<HTMLInputElement>(null);
 
   async function handleQrFileChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -72,20 +62,6 @@ export function PlatformSettingsForm({
     }
   }
 
-  function handleFetchBcv() {
-    setBcvError(null);
-    setSaved(false);
-    startBcvFetch(async () => {
-      const result = await fetchAndUpdatePlatformBcvRate();
-      if (!result.success) {
-        setBcvError(result.error);
-        return;
-      }
-      setRate(String(result.rate));
-      router.refresh();
-    });
-  }
-
   function handleSave(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
@@ -95,7 +71,6 @@ export function PlatformSettingsForm({
         paymentInstructions: instructions,
         binanceQrDataUrl,
         binanceId,
-        billingExchangeRate: rate,
         defaultMonthlyFee: defaultFee,
       });
       if (!result.success) {
@@ -126,37 +101,6 @@ export function PlatformSettingsForm({
         <p className="text-xs text-muted-foreground">
           Se aplica automáticamente a todo negocio nuevo al aprobarlo, salvo que le pongas un
           precio distinto después.
-        </p>
-      </div>
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor="platform-rate">Tasa de cambio de la plataforma (Bs/USD)</Label>
-        <div className="flex gap-2">
-          <Input
-            id="platform-rate"
-            type="number"
-            step="0.0001"
-            min="0"
-            value={rate}
-            onChange={(e) => {
-              setRate(e.target.value);
-              setSaved(false);
-            }}
-            placeholder="Ej. 45.0000"
-          />
-          <Button
-            type="button"
-            variant="outline"
-            className="shrink-0"
-            onClick={handleFetchBcv}
-            disabled={isFetchingBcv}
-          >
-            {isFetchingBcv ? "Consultando BCV..." : "Actualizar con tasa BCV"}
-          </Button>
-        </div>
-        {bcvError && <p className="text-sm text-destructive">{bcvError}</p>}
-        <p className="text-xs text-muted-foreground">
-          Se actualiza sola todos los días con la tasa oficial del BCV. Al cambiarla (manual o con
-          el botón), el monto en bolívares que ve cada negocio se recalcula automáticamente.
         </p>
       </div>
       <div className="flex flex-col gap-1.5">

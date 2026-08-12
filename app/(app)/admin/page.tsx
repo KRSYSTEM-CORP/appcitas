@@ -41,7 +41,6 @@ export default async function AdminPage() {
           initialInstructions={platformSettings.paymentInstructions}
           initialBinanceQrDataUrl={platformSettings.binanceQrDataUrl}
           initialBinanceId={platformSettings.binanceId}
-          initialBillingExchangeRate={platformSettings.billingExchangeRate}
           initialDefaultMonthlyFeeUsdCents={platformSettings.defaultMonthlyFeeUsdCents}
         />
       </div>

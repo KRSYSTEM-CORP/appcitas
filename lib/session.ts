@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import type { Role } from "@prisma/client";
-import { isBusinessBlocked, PLATFORM_SETTINGS_ID } from "@/lib/billing";
+import { isBusinessBlocked } from "@/lib/billing";
 import {
   SESSION_COOKIE_NAME,
   SESSION_MAX_AGE_SECONDS,
@@ -38,7 +38,6 @@ export type Session = {
   billingBlocked: boolean;
   isExempt: boolean;
   monthlyFeeUsdCents: number | null;
-  billingExchangeRate: number | null;
   localCurrencyCode: string;
   nextPaymentDueDate: Date | null;
 };
@@ -54,22 +53,19 @@ export async function getSession(): Promise<Session | null> {
   // Re-validate against the DB on every call so a deleted user/business, or a
   // user suspended by the owner mid-session, is caught immediately instead of
   // trusting a still-valid signed cookie until it expires.
-  const [user, platformSettings] = await Promise.all([
-    prisma.user.findUnique({
-      where: { id: payload.uid },
-      include: {
-        business: {
-          select: {
-            isExempt: true,
-            monthlyFeeUsdCents: true,
-            nextPaymentDueDate: true,
-            localCurrencyCode: true,
-          },
+  const user = await prisma.user.findUnique({
+    where: { id: payload.uid },
+    include: {
+      business: {
+        select: {
+          isExempt: true,
+          monthlyFeeUsdCents: true,
+          nextPaymentDueDate: true,
+          localCurrencyCode: true,
         },
       },
-    }),
-    prisma.platformSettings.findUnique({ where: { id: PLATFORM_SETTINGS_ID } }),
-  ]);
+    },
+  });
   if (!user || user.businessId !== payload.bid || user.status !== "ACTIVE") return null;
 
   const isExempt = user.business.isExempt;
@@ -86,9 +82,6 @@ export async function getSession(): Promise<Session | null> {
     billingBlocked: user.isSuperAdmin ? false : isBusinessBlocked({ isExempt, nextPaymentDueDate }),
     isExempt,
     monthlyFeeUsdCents: user.business.monthlyFeeUsdCents,
-    // Platform-wide rate (not per-business) — see PlatformSettings.
-    billingExchangeRate:
-      platformSettings?.billingExchangeRate != null ? Number(platformSettings.billingExchangeRate) : null,
     localCurrencyCode: user.business.localCurrencyCode,
     nextPaymentDueDate,
   };

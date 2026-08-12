@@ -10,6 +10,7 @@ export async function fetchBcvRate(currency: "USD" | "EUR"): Promise<number> {
   const path = currency === "USD" ? "dolares" : "euros";
   const res = await fetch(`https://ve.dolarapi.com/v1/${path}/oficial`, {
     cache: "no-store",
+    signal: AbortSignal.timeout(5000),
   });
   if (!res.ok) {
     throw new Error("No se pudo consultar la tasa del BCV");

@@ -97,6 +97,15 @@ export type FxInfo = {
   rate: number | null;
 };
 
+// The daily Vercel cron (app/api/cron/bcv-rate/route.ts) is the primary way
+// this refreshes, but Vercel's own scheduler has occasionally failed to fire
+// it without any app-level cause (seen on the sibling ventas-inventario
+// project). As a self-healing backstop, any read of the rate for a VES
+// business also refreshes it here if it's gone stale — so the rate corrects
+// itself the next time someone opens the app, regardless of whether the
+// cron actually ran that day.
+const STALE_RATE_MS = 20 * 60 * 60 * 1000;
+
 // Lightweight lookup for any signed-in role — the payment form needs this
 // without pulling the full owner-only business config.
 export async function getFxInfo(): Promise<FxInfo> {
@@ -105,14 +114,41 @@ export async function getFxInfo(): Promise<FxInfo> {
 
   const business = await prisma.business.findUnique({
     where: { id: session.businessId },
-    select: { fxEnabled: true, localCurrencyCode: true, foreignCurrencyCode: true, exchangeRate: true },
+    select: {
+      fxEnabled: true,
+      localCurrencyCode: true,
+      foreignCurrencyCode: true,
+      exchangeRate: true,
+      exchangeRateUpdatedAt: true,
+    },
   });
+
+  let rate = business?.exchangeRate != null ? Number(business.exchangeRate) : null;
+
+  const isStale =
+    business?.localCurrencyCode === "VES" &&
+    business.fxEnabled &&
+    (business.exchangeRateUpdatedAt == null ||
+      Date.now() - business.exchangeRateUpdatedAt.getTime() > STALE_RATE_MS);
+
+  if (isStale && business) {
+    try {
+      const freshRate = await fetchBcvRate(business.foreignCurrencyCode as "USD" | "EUR");
+      await prisma.business.update({
+        where: { id: session.businessId },
+        data: { exchangeRate: freshRate, exchangeRateUpdatedAt: new Date() },
+      });
+      rate = freshRate;
+    } catch {
+      // Keep serving the last known rate; the next page load or the cron retries.
+    }
+  }
 
   return {
     fxEnabled: business?.fxEnabled ?? false,
     localCurrencyCode: business?.localCurrencyCode ?? "USD",
     foreignCurrencyCode: business?.foreignCurrencyCode ?? "USD",
-    rate: business?.exchangeRate != null ? Number(business.exchangeRate) : null,
+    rate,
   };
 }
 

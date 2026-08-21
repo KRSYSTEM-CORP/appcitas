@@ -176,25 +176,42 @@ export async function getSpecialistHours(
   specialistId: string,
 ): Promise<{ hasCustomHours: boolean; hours: SpecialistHourItem[] } | null> {
   const { businessId } = await requireOwner();
-  const specialist = await prisma.specialist.findFirst({
-    where: { id: specialistId, businessId },
-    select: { hasCustomHours: true, hours: true },
-  });
+  const [specialist, businessHours] = await Promise.all([
+    prisma.specialist.findFirst({
+      where: { id: specialistId, businessId },
+      select: { hasCustomHours: true, hours: true },
+    }),
+    prisma.businessHour.findMany({ where: { businessId } }),
+  ]);
   if (!specialist) return null;
 
   const byWeekday = new Map(specialist.hours.map((h) => [h.weekday, h]));
+  const businessByWeekday = new Map(businessHours.map((h) => [h.weekday, h]));
   const hours = WEEKDAYS.map((weekday) => {
     const h = byWeekday.get(weekday);
-    return h
-      ? {
-          weekday,
-          isClosed: h.isClosed,
-          opensAt: h.opensAt,
-          closesAt: h.closesAt,
-          breakStart: h.breakStart,
-          breakEnd: h.breakEnd,
-        }
-      : { weekday, isClosed: false, opensAt: null, closesAt: null, breakStart: null, breakEnd: null };
+    if (h) {
+      return {
+        weekday,
+        isClosed: h.isClosed,
+        opensAt: h.opensAt,
+        closesAt: h.closesAt,
+        breakStart: h.breakStart,
+        breakEnd: h.breakEnd,
+      };
+    }
+    // No SpecialistHour saved yet for this day — seed the form with the
+    // business's own hours as a starting point (rather than blank fields,
+    // which render as a stray browser placeholder time in every input) so
+    // the owner only has to adjust the days that actually differ.
+    const b = businessByWeekday.get(weekday);
+    return {
+      weekday,
+      isClosed: b?.isClosed ?? true,
+      opensAt: b?.opensAt ?? null,
+      closesAt: b?.closesAt ?? null,
+      breakStart: b?.breakStart ?? null,
+      breakEnd: b?.breakEnd ?? null,
+    };
   });
 
   return { hasCustomHours: specialist.hasCustomHours, hours };

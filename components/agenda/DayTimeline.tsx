@@ -79,7 +79,7 @@ export function DayTimeline({
         >
           {specialists.map((specialist) => {
             const specialistAppointments = appointments.filter(
-              (a) => a.specialist.id === specialist.id && a.status !== "CANCELLED",
+              (a) => a.specialist?.id === specialist.id && a.status !== "CANCELLED",
             );
             return (
               <div key={specialist.id} className="relative border-r border-border last:border-r-0">

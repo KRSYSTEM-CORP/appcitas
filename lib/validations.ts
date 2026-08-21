@@ -98,6 +98,11 @@ export const ServiceHoursSchema = z.object({
   hours: z.array(WeekdayHourSchema).length(7, "Debe incluir los 7 días de la semana"),
 });
 
+export const SpecialistHoursSchema = z.object({
+  hasCustomHours: z.boolean(),
+  hours: z.array(WeekdayHourSchema).length(7, "Debe incluir los 7 días de la semana"),
+});
+
 export const ServiceSchema = z.object({
   name: z.string().trim().min(1, "El nombre del servicio es obligatorio"),
   description: z.string().trim().optional().or(z.literal("")),

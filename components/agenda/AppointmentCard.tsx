@@ -4,7 +4,7 @@ import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { MessageCircle, MessageCircleCheck } from "lucide-react";
-import { updateAppointmentStatus, type AppointmentListItem } from "@/lib/actions/appointments";
+import { assignSpecialist, updateAppointmentStatus, type AppointmentListItem } from "@/lib/actions/appointments";
 import { PaymentForm } from "@/components/agenda/PaymentForm";
 import { CopyCancelLinkButton } from "@/components/shared/CopyCancelLinkButton";
 import { PaymentReceiptDialog } from "@/components/shared/PaymentReceiptDialog";
@@ -28,6 +28,7 @@ export function AppointmentCard({
   foreignCurrencyCode,
   rate,
   businessName,
+  qualifiedSpecialists = [],
 }: {
   appointment: AppointmentListItem;
   currencyCode: string;
@@ -35,10 +36,30 @@ export function AppointmentCard({
   foreignCurrencyCode: string;
   rate: number | null;
   businessName: string;
+  // Specialists who can perform this appointment's service — only needed
+  // when appointment.specialist is null, to populate the "Asignar a" picker.
+  qualifiedSpecialists?: { id: string; displayName: string }[];
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [showPaymentForm, setShowPaymentForm] = useState(false);
+  const [assigning, setAssigning] = useState(false);
+  const [assignError, setAssignError] = useState<string | null>(null);
+
+  function handleAssign(specialistId: string) {
+    if (!specialistId) return;
+    setAssignError(null);
+    setAssigning(true);
+    startTransition(async () => {
+      const result = await assignSpecialist(appointment.id, specialistId);
+      setAssigning(false);
+      if (!result.success) {
+        setAssignError(result.error);
+        return;
+      }
+      router.refresh();
+    });
+  }
   // Filled in after mount, not during render, so the client's first render
   // still matches the server-rendered HTML (window is unavailable server-side).
   const [origin, setOrigin] = useState<string | null>(null);
@@ -136,6 +157,30 @@ export function AppointmentCard({
         </div>
       </div>
 
+      {!appointment.specialist && (
+        <div className="flex items-center gap-1.5">
+          <span className="text-[10px] font-semibold uppercase tracking-wide rounded-full border border-current px-1.5 py-0.5 opacity-70">
+            Sin asignar
+          </span>
+          <select
+            disabled={assigning}
+            defaultValue=""
+            onChange={(e) => handleAssign(e.target.value)}
+            className="text-xs bg-transparent border border-current rounded px-1 py-0.5 opacity-80 focus-visible:outline-none cursor-pointer"
+          >
+            <option value="" disabled>
+              Asignar a…
+            </option>
+            {qualifiedSpecialists.map((s) => (
+              <option key={s.id} value={s.id} className="bg-card text-foreground">
+                {s.displayName}
+              </option>
+            ))}
+          </select>
+          {assignError && <span className="text-xs text-destructive">{assignError}</span>}
+        </div>
+      )}
+
       <p className="text-xs opacity-80">
         {appointment.service.name} ·{" "}
         {formatMoney(appointment.service.basePriceCents, appointment.service.priceCurrencyCode)}
@@ -179,7 +224,7 @@ export function AppointmentCard({
                         clientName,
                         clientPhone: appointment.client.phone,
                         serviceName: appointment.service.name,
-                        specialistName: appointment.specialist.displayName,
+                        specialistName: appointment.specialist?.displayName ?? "Sin asignar",
                         sessionLabel: appointment.sessionPackage
                           ? `Sesión ${appointment.sessionNumber}/${appointment.sessionPackage.totalSessions}`
                           : null,

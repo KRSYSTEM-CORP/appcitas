@@ -54,6 +54,10 @@ export function AppointmentForm({
   const [loadingSlots, startSlotsTransition] = useTransition();
 
   const availableServices = useMemo(() => {
+    // "Sin asignar" — staff hasn't picked a specialist yet, so any service
+    // is fair game; getAvailableSlotsForStaff below falls back to combined
+    // availability across whoever can actually perform it.
+    if (!specialistId) return services;
     const specialist = specialists.find((s) => s.id === specialistId);
     if (!specialist) return [];
     return services.filter((s) => specialist.serviceIds.includes(s.id));
@@ -68,13 +72,13 @@ export function AppointmentForm({
   // double-bookings or off-hours times through until submit.
   useEffect(() => {
     setTime(null);
-    if (!specialistId || !serviceId || !dateKey) {
+    if (!serviceId || !dateKey) {
       setSlots([]);
       return;
     }
     let cancelled = false;
     startSlotsTransition(async () => {
-      const result = await getAvailableSlotsForStaff(specialistId, serviceId, dateKey);
+      const result = await getAvailableSlotsForStaff(specialistId || undefined, serviceId, dateKey);
       if (!cancelled) setSlots(result);
     });
     return () => {
@@ -107,7 +111,7 @@ export function AppointmentForm({
           clientChoice === NEW_CLIENT
             ? { firstName: newFirstName, lastName: newLastName, phone: newPhone }
             : undefined,
-        specialistId,
+        specialistId: specialistId || undefined,
         serviceId,
         dateKey,
         time,
@@ -135,7 +139,11 @@ export function AppointmentForm({
           }}
           className="flex h-10 w-full rounded-md border border-input bg-card px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
-          {specialists.length === 0 && <option value="">No hay especialistas activos</option>}
+          {specialists.length === 0 ? (
+            <option value="">No hay especialistas activos</option>
+          ) : (
+            <option value="">Sin asignar (elegir después)</option>
+          )}
           {specialists.map((s) => (
             <option key={s.id} value={s.id}>
               {s.displayName}
@@ -178,7 +186,7 @@ export function AppointmentForm({
         <Input id="dateKey" type="date" value={dateKey} onChange={(e) => setDateKey(e.target.value)} required />
       </div>
 
-      {specialistId && serviceId && dateKey && (
+      {serviceId && dateKey && (
         <div className="flex flex-col gap-1.5">
           <Label>Horario disponible</Label>
           {loadingSlots ? (

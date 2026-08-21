@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { ActionResult } from "@/lib/types";
-import type { SpecialistListItem } from "@/lib/actions/specialists";
+import type { CreateSpecialistResult, SpecialistListItem } from "@/lib/actions/specialists";
 import type { ServiceListItem } from "@/lib/actions/services";
 
 export function SpecialistForm({
@@ -16,7 +16,7 @@ export function SpecialistForm({
 }: {
   specialist?: SpecialistListItem;
   services: ServiceListItem[];
-  action: (formData: FormData) => Promise<ActionResult>;
+  action: (formData: FormData) => Promise<CreateSpecialistResult | ActionResult>;
 }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
@@ -38,7 +38,10 @@ export function SpecialistForm({
     startTransition(async () => {
       const result = await action(formData);
       if (result.success) {
-        router.push("/specialists");
+        // Creating (not editing) lands on the new specialist's own page so
+        // the owner can set their working hours right away — see
+        // SpecialistHoursForm in app/(app)/specialists/[id]/page.tsx.
+        router.push("specialistId" in result ? `/specialists/${result.specialistId}` : "/specialists");
         router.refresh();
       } else {
         setError(result.error);

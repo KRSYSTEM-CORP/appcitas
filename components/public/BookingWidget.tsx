@@ -4,11 +4,12 @@ import { useEffect, useMemo, useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { getAvailableSlots, createPublicAppointment } from "@/lib/actions/public";
+import { getAvailableSlots, getAvailableSlotsAnySpecialist, createPublicAppointment } from "@/lib/actions/public";
 import { formatDuration, formatMoney } from "@/lib/format";
 import { todayDateKey } from "@/lib/timezone";
 import { serviceLocalPriceCents } from "@/lib/pricing";
 import type { PublicService, PublicSpecialist } from "@/lib/actions/public";
+import type { SpecialistAssignmentMode } from "@prisma/client";
 
 function todayKey() {
   return todayDateKey();
@@ -21,6 +22,7 @@ export function BookingWidget({
   specialists,
   currencyCode,
   rate,
+  specialistAssignmentMode,
 }: {
   subdomain: string;
   businessId: string;
@@ -28,7 +30,9 @@ export function BookingWidget({
   specialists: PublicSpecialist[];
   currencyCode: string;
   rate: number | null;
+  specialistAssignmentMode: SpecialistAssignmentMode;
 }) {
+  const businessAssigns = specialistAssignmentMode === "BUSINESS_ASSIGNS";
   const [serviceId, setServiceId] = useState("");
   const [specialistId, setSpecialistId] = useState("");
   const [dateKey, setDateKey] = useState(todayKey());
@@ -50,20 +54,24 @@ export function BookingWidget({
 
   useEffect(() => {
     // Nothing to fetch yet — the JSX below only renders the slots section
-    // once specialistId+dateKey are set, so leaving stale `slots` alone
-    // here is fine (it can't be shown).
-    if (!serviceId || !specialistId || !dateKey) return;
+    // once dateKey (and, when the client picks their own specialist,
+    // specialistId) are set, so leaving stale `slots` alone here is fine
+    // (it can't be shown).
+    if (!serviceId || !dateKey) return;
+    if (!businessAssigns && !specialistId) return;
 
     let cancelled = false;
     startSlotsTransition(async () => {
-      const result = await getAvailableSlots(businessId, specialistId, serviceId, dateKey);
+      const result = businessAssigns
+        ? await getAvailableSlotsAnySpecialist(businessId, serviceId, dateKey)
+        : await getAvailableSlots(businessId, specialistId, serviceId, dateKey);
       if (!cancelled) setSlots(result);
     });
     return () => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [serviceId, specialistId, dateKey]);
+  }, [serviceId, specialistId, dateKey, businessAssigns]);
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -75,7 +83,7 @@ export function BookingWidget({
     startTransition(async () => {
       const result = await createPublicAppointment({
         subdomain,
-        specialistId,
+        specialistId: businessAssigns ? undefined : specialistId,
         serviceId,
         dateKey,
         time,
@@ -140,7 +148,7 @@ export function BookingWidget({
         </select>
       </div>
 
-      {serviceId && (
+      {serviceId && !businessAssigns && (
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="specialistId">Especialista</Label>
           <select
@@ -165,7 +173,7 @@ export function BookingWidget({
         </div>
       )}
 
-      {specialistId && (
+      {serviceId && (businessAssigns || specialistId) && (
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="dateKey">Fecha</Label>
           <Input
@@ -182,7 +190,7 @@ export function BookingWidget({
         </div>
       )}
 
-      {specialistId && dateKey && (
+      {serviceId && (businessAssigns || specialistId) && dateKey && (
         <div className="flex flex-col gap-1.5">
           <Label>Horario disponible</Label>
           {loadingSlots ? (

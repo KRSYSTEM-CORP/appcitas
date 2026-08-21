@@ -54,6 +54,7 @@ export default async function PublicBookingPage({ params }: { params: Promise<{ 
             specialists={specialists}
             currencyCode={business.localCurrencyCode}
             rate={business.rate}
+            specialistAssignmentMode={business.specialistAssignmentMode}
           />
         )}
       </main>

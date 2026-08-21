@@ -39,6 +39,8 @@ export default async function AgendaPage({
     view === "day" ? getBusinessHourForWeekday(dayWeekday) : Promise.resolve(null),
   ]);
 
+  const unassignedToday = view === "day" ? appointments.filter((a) => !a.specialist) : [];
+
   const rangeLabel =
     view === "day"
       ? formatDayLabel(zonedMidnightUtc(dateKey))
@@ -105,9 +107,31 @@ export default async function AgendaPage({
       ) : view === "day" ? (
         <div className="flex flex-col gap-4">
           <DayTimeline specialists={specialists} appointments={appointments} hours={dayHours} />
-          <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(${specialists.length}, minmax(220px, 1fr))` }}>
+          <div
+            className="grid gap-4"
+            style={{ gridTemplateColumns: `repeat(${specialists.length + (unassignedToday.length > 0 ? 1 : 0)}, minmax(220px, 1fr))` }}
+          >
+            {unassignedToday.length > 0 && (
+              <div className="flex flex-col gap-2">
+                <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Sin asignar</h2>
+                <div className="flex flex-col gap-2">
+                  {unassignedToday.map((a) => (
+                    <AppointmentCard
+                      key={a.id}
+                      appointment={a}
+                      currencyCode={fx.localCurrencyCode}
+                      fxEnabled={fx.fxEnabled}
+                      foreignCurrencyCode={fx.foreignCurrencyCode}
+                      rate={fx.rate}
+                      businessName={session.businessName}
+                      qualifiedSpecialists={specialists.filter((s) => s.serviceIds.includes(a.service.id))}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
             {specialists.map((specialist) => {
-              const dayAppointments = appointments.filter((a) => a.specialist.id === specialist.id);
+              const dayAppointments = appointments.filter((a) => a.specialist?.id === specialist.id);
             return (
               <div key={specialist.id} className="flex flex-col gap-2">
                 <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
@@ -158,7 +182,7 @@ export default async function AgendaPage({
                 {dayAppointments.map((a) => (
                   <div key={a.id} className="flex flex-col gap-1">
                     <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                      {a.specialist.displayName}
+                      {a.specialist?.displayName ?? "Sin asignar"}
                     </span>
                     <AppointmentCard
                       appointment={a}
@@ -167,6 +191,7 @@ export default async function AgendaPage({
                       foreignCurrencyCode={fx.foreignCurrencyCode}
                       rate={fx.rate}
                       businessName={session.businessName}
+                      qualifiedSpecialists={specialists.filter((s) => s.serviceIds.includes(a.service.id))}
                     />
                   </div>
                 ))}

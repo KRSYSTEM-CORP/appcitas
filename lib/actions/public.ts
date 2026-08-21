@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { ClientSchema } from "@/lib/validations";
 import { zonedTimeToUtc, zonedMidnightUtc, zonedHM, weekdayOf } from "@/lib/timezone";
 import type { ActionResult } from "@/lib/types";
-import type { AppointmentStatus } from "@prisma/client";
+import type { AppointmentStatus, SpecialistAssignmentMode } from "@prisma/client";
 
 // Everything in this file is intentionally unauthenticated — it's the
 // surface a not-signed-in end client hits at /book/[subdomain]. Every query
@@ -23,6 +23,7 @@ export type PublicBusiness = {
   fxEnabled: boolean;
   foreignCurrencyCode: string;
   rate: number | null;
+  specialistAssignmentMode: SpecialistAssignmentMode;
 };
 
 export async function getPublicBusiness(subdomain: string): Promise<PublicBusiness | null> {
@@ -39,6 +40,7 @@ export async function getPublicBusiness(subdomain: string): Promise<PublicBusine
       fxEnabled: true,
       foreignCurrencyCode: true,
       exchangeRate: true,
+      specialistAssignmentMode: true,
     },
   });
   if (!business) return null;
@@ -109,9 +111,98 @@ export async function listPublicCatalog(
 
 const SLOT_STEP_MINUTES = 30;
 
-// Half-hour grid between the business's open/close for that weekday, minus
-// any window already taken by a non-cancelled appointment for that
-// specialist, minus anything already in the past if dateKey is today.
+type DayInterval = { start: Date; end: Date };
+
+// The business/service open-close window for one weekday, before any
+// specialist-level restriction is applied — shared by the fixed-specialist
+// and any-specialist slot functions below so they agree on the base grid.
+async function resolveBaseWindow(
+  businessId: string,
+  serviceId: string,
+  dateKey: string,
+): Promise<{ open: Date; close: Date; breaks: DayInterval[]; durationMinutes: number } | null> {
+  const weekday = weekdayOf(dateKey);
+  const [businessHours, service] = await Promise.all([
+    prisma.businessHour.findUnique({ where: { businessId_weekday: { businessId, weekday } } }),
+    prisma.service.findFirst({
+      where: { id: serviceId, businessId, active: true },
+      include: { hours: { where: { weekday } } },
+    }),
+  ]);
+  if (!service) return null;
+
+  // A service with hasCustomHours fully replaces the business's default
+  // hours for that weekday (rather than intersecting with them) — see
+  // ServiceHour in prisma/schema.prisma.
+  const hours = service.hasCustomHours ? service.hours[0] : businessHours;
+  if (!hours || hours.isClosed || !hours.opensAt || !hours.closesAt) return null;
+
+  const open = zonedTimeToUtc(dateKey, hours.opensAt);
+  const close = zonedTimeToUtc(dateKey, hours.closesAt);
+  const breaks: DayInterval[] = [];
+  if (hours.breakStart && hours.breakEnd) {
+    breaks.push({ start: zonedTimeToUtc(dateKey, hours.breakStart), end: zonedTimeToUtc(dateKey, hours.breakEnd) });
+  }
+  return { open, close, breaks, durationMinutes: service.durationMinutes };
+}
+
+// Narrows a base window down to one specialist's own working hours for that
+// weekday, when they have a custom schedule (Specialist.hasCustomHours) —
+// intersected with, never wider than, the base window. Returns null if the
+// specialist doesn't work at all that day (or the base window itself is
+// null/closed).
+function narrowToSpecialist(
+  base: { open: Date; close: Date; breaks: DayInterval[] } | null,
+  specialistHasCustomHours: boolean,
+  specialistHour: { opensAt: string | null; closesAt: string | null; isClosed: boolean; breakStart: string | null; breakEnd: string | null } | undefined,
+  dateKey: string,
+): { open: Date; close: Date; breaks: DayInterval[] } | null {
+  if (!base) return null;
+  if (!specialistHasCustomHours) return base;
+  if (!specialistHour || specialistHour.isClosed || !specialistHour.opensAt || !specialistHour.closesAt) return null;
+
+  const specOpen = zonedTimeToUtc(dateKey, specialistHour.opensAt);
+  const specClose = zonedTimeToUtc(dateKey, specialistHour.closesAt);
+  const open = specOpen > base.open ? specOpen : base.open;
+  const close = specClose < base.close ? specClose : base.close;
+  if (open >= close) return null;
+
+  const breaks = [...base.breaks];
+  if (specialistHour.breakStart && specialistHour.breakEnd) {
+    breaks.push({
+      start: zonedTimeToUtc(dateKey, specialistHour.breakStart),
+      end: zonedTimeToUtc(dateKey, specialistHour.breakEnd),
+    });
+  }
+  return { open, close, breaks };
+}
+
+function generateSlots(
+  window: { open: Date; close: Date; breaks: DayInterval[] },
+  durationMinutes: number,
+  isFree: (slotStart: Date, slotEnd: Date) => boolean,
+): string[] {
+  const now = new Date();
+  const slots: string[] = [];
+  for (
+    let slotStart = new Date(window.open);
+    slotStart.getTime() + durationMinutes * 60_000 <= window.close.getTime();
+    slotStart = new Date(slotStart.getTime() + SLOT_STEP_MINUTES * 60_000)
+  ) {
+    const slotEnd = new Date(slotStart.getTime() + durationMinutes * 60_000);
+    if (slotStart < now) continue;
+    const overlapsBreak = window.breaks.some((b) => slotStart < b.end && slotEnd > b.start);
+    if (!overlapsBreak && isFree(slotStart, slotEnd)) {
+      slots.push(zonedHM(slotStart));
+    }
+  }
+  return slots;
+}
+
+// Half-hour grid for one specific specialist, minus any window already taken
+// by a non-cancelled appointment of theirs, minus their own hours (if they
+// have a custom schedule) and anything already in the past if dateKey is
+// today.
 export async function getAvailableSlots(
   businessId: string,
   specialistId: string,
@@ -119,19 +210,15 @@ export async function getAvailableSlots(
   dateKey: string,
 ): Promise<string[]> {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) return [];
-  // Boundaries below are all real UTC instants representing Caracas
-  // wall-clock times for this calendar day — never the runtime's own
-  // (UTC-on-Vercel) reading of "midnight"/"09:00"/etc., which would be off
-  // by the zone's offset. See lib/timezone.ts for why this matters.
   const dayStart = zonedMidnightUtc(dateKey);
   const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60_000);
   const weekday = weekdayOf(dateKey);
 
-  const [businessHours, service, appointments] = await Promise.all([
-    prisma.businessHour.findUnique({ where: { businessId_weekday: { businessId, weekday } } }),
-    prisma.service.findFirst({
-      where: { id: serviceId, businessId, active: true },
-      include: { hours: { where: { weekday } } },
+  const [base, specialist, appointments] = await Promise.all([
+    resolveBaseWindow(businessId, serviceId, dateKey),
+    prisma.specialist.findFirst({
+      where: { id: specialistId, businessId },
+      select: { hasCustomHours: true, hours: { where: { weekday } } },
     }),
     prisma.appointment.findMany({
       where: {
@@ -143,45 +230,85 @@ export async function getAvailableSlots(
       select: { startsAt: true, endsAt: true },
     }),
   ]);
+  if (!base || !specialist) return [];
 
-  if (!service) return [];
+  const window = narrowToSpecialist(base, specialist.hasCustomHours, specialist.hours[0], dateKey);
+  if (!window) return [];
 
-  // A service with hasCustomHours fully replaces the business's default
-  // hours for that weekday (rather than intersecting with them) — see
-  // ServiceHour in prisma/schema.prisma.
-  const hours = service.hasCustomHours ? service.hours[0] : businessHours;
-  if (!hours || hours.isClosed || !hours.opensAt || !hours.closesAt) return [];
+  return generateSlots(
+    window,
+    base.durationMinutes,
+    (slotStart, slotEnd) => !appointments.some((a) => slotStart < a.endsAt && slotEnd > a.startsAt),
+  );
+}
 
-  const dayOpen = zonedTimeToUtc(dateKey, hours.opensAt);
-  const dayClose = zonedTimeToUtc(dateKey, hours.closesAt);
+// Half-hour grid for "any qualified specialist" — used when the business is
+// in BUSINESS_ASSIGNS mode, so the client never picks a specific person. A
+// slot is offered while at least one active specialist who performs this
+// service is both working (per their own hours, intersected with the
+// business/service hours) and not already busy then — busy meaning either
+// an appointment already assigned to them (any service), or one of the
+// business's own not-yet-assigned appointments for this same service
+// claiming that time from the shared pool.
+export async function getAvailableSlotsAnySpecialist(
+  businessId: string,
+  serviceId: string,
+  dateKey: string,
+): Promise<string[]> {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) return [];
+  const dayStart = zonedMidnightUtc(dateKey);
+  const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60_000);
+  const weekday = weekdayOf(dateKey);
 
-  // An optional daily break (e.g. lunch) carved out of the open/close window —
-  // treated exactly like an appointment for overlap purposes below, so a
-  // slot that would spill into it is skipped the same way a booked slot is.
-  const breakStart = hours.breakStart ? zonedTimeToUtc(dateKey, hours.breakStart) : null;
-  const breakEnd = hours.breakEnd ? zonedTimeToUtc(dateKey, hours.breakEnd) : null;
+  const base = await resolveBaseWindow(businessId, serviceId, dateKey);
+  if (!base) return [];
 
-  const now = new Date();
-  const slots: string[] = [];
-  for (
-    let slotStart = new Date(dayOpen);
-    slotStart.getTime() + service.durationMinutes * 60_000 <= dayClose.getTime();
-    slotStart = new Date(slotStart.getTime() + SLOT_STEP_MINUTES * 60_000)
-  ) {
-    const slotEnd = new Date(slotStart.getTime() + service.durationMinutes * 60_000);
-    if (slotStart < now) continue;
-    const overlapsAppointment = appointments.some((a) => slotStart < a.endsAt && slotEnd > a.startsAt);
-    const overlapsBreak = breakStart && breakEnd && slotStart < breakEnd && slotEnd > breakStart;
-    if (!overlapsAppointment && !overlapsBreak) {
-      slots.push(zonedHM(slotStart));
-    }
-  }
-  return slots;
+  const [specialists, unassignedAppointments] = await Promise.all([
+    prisma.specialist.findMany({
+      where: { businessId, active: true, services: { some: { serviceId } } },
+      select: {
+        id: true,
+        hasCustomHours: true,
+        hours: { where: { weekday } },
+        appointments: {
+          where: { status: { notIn: ["CANCELLED", "NO_SHOW"] }, startsAt: { gte: dayStart, lt: dayEnd } },
+          select: { startsAt: true, endsAt: true },
+        },
+      },
+    }),
+    prisma.appointment.findMany({
+      where: {
+        businessId,
+        serviceId,
+        specialistId: null,
+        status: { notIn: ["CANCELLED", "NO_SHOW"] },
+        startsAt: { gte: dayStart, lt: dayEnd },
+      },
+      select: { startsAt: true, endsAt: true },
+    }),
+  ]);
+  if (specialists.length === 0) return [];
+
+  const specialistWindows = specialists
+    .map((s) => ({ appointments: s.appointments, window: narrowToSpecialist(base, s.hasCustomHours, s.hours[0], dateKey) }))
+    .filter((s): s is { appointments: typeof specialists[number]["appointments"]; window: NonNullable<ReturnType<typeof narrowToSpecialist>> } => s.window != null);
+
+  return generateSlots(base, base.durationMinutes, (slotStart, slotEnd) => {
+    const availableCount = specialistWindows.filter((s) => {
+      if (slotStart < s.window.open || slotEnd > s.window.close) return false;
+      if (s.window.breaks.some((b) => slotStart < b.end && slotEnd > b.start)) return false;
+      return !s.appointments.some((a) => slotStart < a.endsAt && slotEnd > a.startsAt);
+    }).length;
+    const claimedByUnassigned = unassignedAppointments.filter((a) => slotStart < a.endsAt && slotEnd > a.startsAt).length;
+    return availableCount > claimedByUnassigned;
+  });
 }
 
 export type PublicBookingInput = {
   subdomain: string;
-  specialistId: string;
+  // Omitted when the business is in BUSINESS_ASSIGNS mode — the widget never
+  // shows a specialist picker in that case, so there's nothing to send.
+  specialistId?: string;
   serviceId: string;
   dateKey: string;
   time: string;
@@ -199,11 +326,18 @@ export async function createPublicAppointment(input: PublicBookingInput): Promis
     return { success: false, error: clientParsed.error.issues[0]?.message ?? "Datos de contacto inválidos" };
   }
 
+  const businessAssigns = business.specialistAssignmentMode === "BUSINESS_ASSIGNS";
+  if (!businessAssigns && !input.specialistId) {
+    return { success: false, error: "Elige un especialista" };
+  }
+
   const [specialist, service] = await Promise.all([
-    prisma.specialist.findFirst({ where: { id: input.specialistId, businessId: business.id, active: true } }),
+    input.specialistId
+      ? prisma.specialist.findFirst({ where: { id: input.specialistId, businessId: business.id, active: true } })
+      : null,
     prisma.service.findFirst({ where: { id: input.serviceId, businessId: business.id, active: true } }),
   ]);
-  if (!specialist) return { success: false, error: "Especialista no válido" };
+  if (!businessAssigns && !specialist) return { success: false, error: "Especialista no válido" };
   if (!service) return { success: false, error: "Servicio no válido" };
 
   const startsAt = zonedTimeToUtc(input.dateKey, input.time);
@@ -212,15 +346,26 @@ export async function createPublicAppointment(input: PublicBookingInput): Promis
   }
   const endsAt = new Date(startsAt.getTime() + service.durationMinutes * 60_000);
 
-  const conflict = await prisma.appointment.findFirst({
-    where: {
-      specialistId: specialist.id,
-      status: { notIn: ["CANCELLED", "NO_SHOW"] },
-      startsAt: { lt: endsAt },
-      endsAt: { gt: startsAt },
-    },
-  });
-  if (conflict) return { success: false, error: "Ese horario ya no está disponible, elige otro" };
+  if (specialist) {
+    const conflict = await prisma.appointment.findFirst({
+      where: {
+        specialistId: specialist.id,
+        status: { notIn: ["CANCELLED", "NO_SHOW"] },
+        startsAt: { lt: endsAt },
+        endsAt: { gt: startsAt },
+      },
+    });
+    if (conflict) return { success: false, error: "Ese horario ya no está disponible, elige otro" };
+  } else {
+    // No fixed specialist yet — re-check the shared pool the same way
+    // getAvailableSlotsAnySpecialist does, so a slot that filled up between
+    // the widget loading and this submit gets rejected instead of silently
+    // over-booking the business's real capacity.
+    const stillAvailable = (await getAvailableSlotsAnySpecialist(business.id, service.id, input.dateKey)).includes(
+      zonedHM(startsAt),
+    );
+    if (!stillAvailable) return { success: false, error: "Ese horario ya no está disponible, elige otro" };
+  }
 
   const existingClient = await prisma.client.findUnique({
     where: { businessId_phone: { businessId: business.id, phone: clientParsed.data.phone } },
@@ -240,7 +385,14 @@ export async function createPublicAppointment(input: PublicBookingInput): Promis
     ).id;
 
   const created = await prisma.appointment.create({
-    data: { businessId: business.id, clientId, specialistId: specialist.id, serviceId: service.id, startsAt, endsAt },
+    data: {
+      businessId: business.id,
+      clientId,
+      specialistId: specialist?.id ?? null,
+      serviceId: service.id,
+      startsAt,
+      endsAt,
+    },
     select: { cancelToken: true },
   });
 

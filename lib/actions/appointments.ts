@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { zonedTimeToUtc } from "@/lib/timezone";
-import { getAvailableSlots } from "@/lib/actions/public";
+import { getAvailableSlots, getAvailableSlotsAnySpecialist } from "@/lib/actions/public";
 import type { ActionResult } from "@/lib/types";
 import type { AppointmentStatus, PackagePaymentMode, PaymentMethod } from "@prisma/client";
 
@@ -18,7 +18,9 @@ export type AppointmentListItem = {
   sessionNumber: number | null;
   sessionPackage: { id: string; totalSessions: number; paymentMode: PackagePaymentMode } | null;
   client: { id: string; firstName: string; lastName: string; phone: string };
-  specialist: { id: string; displayName: string };
+  // Null when the business is in BUSINESS_ASSIGNS mode and staff hasn't
+  // distributed this appointment to a specialist yet.
+  specialist: { id: string; displayName: string } | null;
   service: { id: string; name: string; durationMinutes: number; basePriceCents: number; priceCurrencyCode: string };
   transactions: {
     id: string;
@@ -70,7 +72,11 @@ export async function listAppointmentsInRange(start: Date, end: Date): Promise<A
 export type CreateAppointmentInput = {
   clientId?: string;
   newClient?: { firstName: string; lastName: string; phone: string; email?: string };
-  specialistId: string;
+  // Optional so staff can leave a cita "Sin asignar" and distribute it from
+  // the agenda later (assignSpecialist below) — independent of the
+  // business's SpecialistAssignmentMode, which only governs the public
+  // booking widget.
+  specialistId?: string;
   serviceId: string;
   dateKey: string;
   time: string;
@@ -83,30 +89,34 @@ export async function createAppointment(input: CreateAppointmentInput): Promise<
   if (!input.clientId && !input.newClient) {
     return { success: false, error: "Elige un cliente o registra uno nuevo" };
   }
-  if (!input.specialistId || !input.serviceId) {
-    return { success: false, error: "Elige especialista y servicio" };
+  if (!input.serviceId) {
+    return { success: false, error: "Elige un servicio" };
   }
 
   const [specialist, service] = await Promise.all([
-    prisma.specialist.findFirst({ where: { id: input.specialistId, businessId, active: true } }),
+    input.specialistId
+      ? prisma.specialist.findFirst({ where: { id: input.specialistId, businessId, active: true } })
+      : null,
     prisma.service.findFirst({ where: { id: input.serviceId, businessId, active: true } }),
   ]);
-  if (!specialist) return { success: false, error: "Especialista no válido" };
+  if (input.specialistId && !specialist) return { success: false, error: "Especialista no válido" };
   if (!service) return { success: false, error: "Servicio no válido" };
 
   const startsAt = zonedTimeToUtc(input.dateKey, input.time);
   if (Number.isNaN(startsAt.getTime())) return { success: false, error: "Fecha u hora inválidas" };
   const endsAt = new Date(startsAt.getTime() + service.durationMinutes * 60_000);
 
-  const conflict = await prisma.appointment.findFirst({
-    where: {
-      specialistId: specialist.id,
-      status: { notIn: ["CANCELLED", "NO_SHOW"] },
-      startsAt: { lt: endsAt },
-      endsAt: { gt: startsAt },
-    },
-  });
-  if (conflict) return { success: false, error: "El especialista ya tiene una cita en ese horario" };
+  if (specialist) {
+    const conflict = await prisma.appointment.findFirst({
+      where: {
+        specialistId: specialist.id,
+        status: { notIn: ["CANCELLED", "NO_SHOW"] },
+        startsAt: { lt: endsAt },
+        endsAt: { gt: startsAt },
+      },
+    });
+    if (conflict) return { success: false, error: "El especialista ya tiene una cita en ese horario" };
+  }
 
   let clientId = input.clientId;
   if (!clientId && input.newClient) {
@@ -138,13 +148,51 @@ export async function createAppointment(input: CreateAppointmentInput): Promise<
     data: {
       businessId,
       clientId,
-      specialistId: specialist.id,
+      specialistId: specialist?.id ?? null,
       serviceId: service.id,
       startsAt,
       endsAt,
       notes: input.notes?.trim() || null,
     },
   });
+
+  revalidatePath("/agenda");
+  return { success: true };
+}
+
+// Distributes an unassigned (or reassigns an already-assigned) appointment
+// to a specialist — the day-to-day workflow for a business in
+// BUSINESS_ASSIGNS mode, but usable any time staff wants to change who's
+// covering a cita. Re-validates qualification and schedule conflict the same
+// way createAppointment does, since the appointment may have been created
+// without ever checking a specific specialist's availability.
+export async function assignSpecialist(appointmentId: string, specialistId: string): Promise<ActionResult> {
+  const { businessId } = await requireSession();
+
+  const appointment = await prisma.appointment.findFirst({ where: { id: appointmentId, businessId } });
+  if (!appointment) return { success: false, error: "Cita no encontrada" };
+
+  const specialist = await prisma.specialist.findFirst({
+    where: { id: specialistId, businessId, active: true },
+    include: { services: { where: { serviceId: appointment.serviceId } } },
+  });
+  if (!specialist) return { success: false, error: "Especialista no válido" };
+  if (specialist.services.length === 0) {
+    return { success: false, error: "Ese especialista no ofrece el servicio de esta cita" };
+  }
+
+  const conflict = await prisma.appointment.findFirst({
+    where: {
+      id: { not: appointmentId },
+      specialistId,
+      status: { notIn: ["CANCELLED", "NO_SHOW"] },
+      startsAt: { lt: appointment.endsAt },
+      endsAt: { gt: appointment.startsAt },
+    },
+  });
+  if (conflict) return { success: false, error: "Ese especialista ya tiene una cita en ese horario" };
+
+  await prisma.appointment.update({ where: { id: appointmentId }, data: { specialistId } });
 
   revalidatePath("/agenda");
   return { success: true };
@@ -170,12 +218,17 @@ export async function updateAppointmentStatus(
 // the public booking widget) — resolves businessId from the signed-in
 // session instead of trusting a client-supplied one, so the internal "Nueva
 // cita" form shows staff exactly the same free/busy slots a client would see
-// on the public booking link, instead of a free-text time field.
+// on the public booking link, instead of a free-text time field. Staff can
+// leave the specialist unset (regardless of the business's
+// SpecialistAssignmentMode) to see combined availability and assign someone
+// later — see getAvailableSlotsAnySpecialist.
 export async function getAvailableSlotsForStaff(
-  specialistId: string,
+  specialistId: string | undefined,
   serviceId: string,
   dateKey: string,
 ): Promise<string[]> {
   const { businessId } = await requireSession();
-  return getAvailableSlots(businessId, specialistId, serviceId, dateKey);
+  return specialistId
+    ? getAvailableSlots(businessId, specialistId, serviceId, dateKey)
+    : getAvailableSlotsAnySpecialist(businessId, serviceId, dateKey);
 }

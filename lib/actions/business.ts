@@ -13,6 +13,7 @@ import {
 import { fetchBcvRate } from "@/lib/bcv-rate";
 import { DEFAULT_CURRENCY_CODE } from "@/lib/currencies";
 import type { ActionResult } from "@/lib/types";
+import type { SpecialistAssignmentMode } from "@prisma/client";
 
 export type BusinessBrandingOnly = {
   logoDataUrl: string | null;
@@ -49,6 +50,7 @@ export type BusinessConfig = {
   foreignCurrencyCode: string;
   currentRate: number | null;
   currentRateUpdatedAt: Date | null;
+  specialistAssignmentMode: SpecialistAssignmentMode;
   hours: {
     weekday: number;
     isClosed: boolean;
@@ -79,6 +81,7 @@ export async function getBusinessConfig(): Promise<BusinessConfig> {
     foreignCurrencyCode: business.foreignCurrencyCode,
     currentRate: business.exchangeRate != null ? Number(business.exchangeRate) : null,
     currentRateUpdatedAt: business.exchangeRateUpdatedAt,
+    specialistAssignmentMode: business.specialistAssignmentMode,
     hours: business.businessHours.map((h) => ({
       weekday: h.weekday,
       isClosed: h.isClosed,
@@ -355,6 +358,19 @@ export async function updateBusinessHours(hours: BusinessConfig["hours"]): Promi
       }),
     ),
   );
+
+  revalidatePath("/settings", "layout");
+  return { success: true };
+}
+
+// Who decides which specialist handles a given appointment — see
+// SpecialistAssignmentMode in prisma/schema.prisma. Only affects the public
+// booking widget's flow; staff can always leave a cita unassigned or
+// reassign it from the agenda regardless of this setting.
+export async function updateSpecialistAssignmentMode(mode: SpecialistAssignmentMode): Promise<ActionResult> {
+  const { businessId } = await requireOwner();
+
+  await prisma.business.update({ where: { id: businessId }, data: { specialistAssignmentMode: mode } });
 
   revalidatePath("/settings", "layout");
   return { success: true };

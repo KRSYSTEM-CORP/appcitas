@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireOwner, requireSession } from "@/lib/session";
-import { SpecialistSchema } from "@/lib/validations";
+import { SpecialistHoursSchema, SpecialistSchema } from "@/lib/validations";
 import type { ActionResult } from "@/lib/types";
 
 export type SpecialistListItem = {
@@ -73,7 +73,9 @@ function parseSpecialistForm(formData: FormData) {
   });
 }
 
-export async function createSpecialist(formData: FormData): Promise<ActionResult> {
+export type CreateSpecialistResult = { success: true; specialistId: string } | { success: false; error: string };
+
+export async function createSpecialist(formData: FormData): Promise<CreateSpecialistResult> {
   const { businessId } = await requireOwner();
 
   const parsed = parseSpecialistForm(formData);
@@ -81,7 +83,7 @@ export async function createSpecialist(formData: FormData): Promise<ActionResult
     return { success: false, error: parsed.error.issues[0]?.message ?? "Datos inválidos" };
   }
 
-  await prisma.specialist.create({
+  const created = await prisma.specialist.create({
     data: {
       businessId,
       displayName: parsed.data.displayName,
@@ -91,7 +93,7 @@ export async function createSpecialist(formData: FormData): Promise<ActionResult
   });
 
   revalidatePath("/specialists");
-  return { success: true };
+  return { success: true, specialistId: created.id };
 }
 
 export async function updateSpecialist(specialistId: string, formData: FormData): Promise<ActionResult> {
@@ -154,6 +156,91 @@ export async function toggleSpecialistActive(specialistId: string, active: boole
     data: { active },
   });
   if (count === 0) return { success: false, error: "Especialista no encontrado" };
+
+  revalidatePath("/specialists");
+  return { success: true };
+}
+
+export type SpecialistHourItem = {
+  weekday: number;
+  isClosed: boolean;
+  opensAt: string | null;
+  closesAt: string | null;
+  breakStart: string | null;
+  breakEnd: string | null;
+};
+
+const WEEKDAYS = [0, 1, 2, 3, 4, 5, 6];
+
+export async function getSpecialistHours(
+  specialistId: string,
+): Promise<{ hasCustomHours: boolean; hours: SpecialistHourItem[] } | null> {
+  const { businessId } = await requireOwner();
+  const specialist = await prisma.specialist.findFirst({
+    where: { id: specialistId, businessId },
+    select: { hasCustomHours: true, hours: true },
+  });
+  if (!specialist) return null;
+
+  const byWeekday = new Map(specialist.hours.map((h) => [h.weekday, h]));
+  const hours = WEEKDAYS.map((weekday) => {
+    const h = byWeekday.get(weekday);
+    return h
+      ? {
+          weekday,
+          isClosed: h.isClosed,
+          opensAt: h.opensAt,
+          closesAt: h.closesAt,
+          breakStart: h.breakStart,
+          breakEnd: h.breakEnd,
+        }
+      : { weekday, isClosed: false, opensAt: null, closesAt: null, breakStart: null, breakEnd: null };
+  });
+
+  return { hasCustomHours: specialist.hasCustomHours, hours };
+}
+
+// hasCustomHours=false leaves the SpecialistHour rows in place (harmless —
+// see getAvailableSlots, which only reads them when the flag is on) so
+// toggling custom hours back on later restores whatever was last configured.
+export async function updateSpecialistHours(
+  specialistId: string,
+  input: { hasCustomHours: boolean; hours: SpecialistHourItem[] },
+): Promise<ActionResult> {
+  const { businessId } = await requireOwner();
+
+  const parsed = SpecialistHoursSchema.safeParse(input);
+  if (!parsed.success) {
+    return { success: false, error: parsed.error.issues[0]?.message ?? "Horario inválido" };
+  }
+
+  const specialist = await prisma.specialist.findFirst({ where: { id: specialistId, businessId } });
+  if (!specialist) return { success: false, error: "Especialista no encontrado" };
+
+  await prisma.$transaction([
+    prisma.specialist.update({ where: { id: specialistId }, data: { hasCustomHours: parsed.data.hasCustomHours } }),
+    ...parsed.data.hours.map((h) =>
+      prisma.specialistHour.upsert({
+        where: { specialistId_weekday: { specialistId, weekday: h.weekday } },
+        create: {
+          specialistId,
+          weekday: h.weekday,
+          isClosed: h.isClosed,
+          opensAt: h.isClosed ? null : h.opensAt || null,
+          closesAt: h.isClosed ? null : h.closesAt || null,
+          breakStart: h.isClosed ? null : h.breakStart || null,
+          breakEnd: h.isClosed ? null : h.breakEnd || null,
+        },
+        update: {
+          isClosed: h.isClosed,
+          opensAt: h.isClosed ? null : h.opensAt || null,
+          closesAt: h.isClosed ? null : h.closesAt || null,
+          breakStart: h.isClosed ? null : h.breakStart || null,
+          breakEnd: h.isClosed ? null : h.breakEnd || null,
+        },
+      }),
+    ),
+  ]);
 
   revalidatePath("/specialists");
   return { success: true };

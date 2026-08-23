@@ -32,55 +32,62 @@ export default async function CurrencySettingsPage() {
     <section className="flex flex-col gap-4">
       <h2 className="text-lg font-semibold">Moneda y tasa de cambio</h2>
 
-      <ReferenceCurrencyForm currentEnabled={business.fxEnabled} currentReferenceCurrency={business.foreignCurrencyCode} />
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="flex flex-col gap-4">
+          <ReferenceCurrencyForm currentEnabled={business.fxEnabled} currentReferenceCurrency={business.foreignCurrencyCode} />
 
-      {business.fxEnabled && (
-        <>
-          <hr className="border-border" />
+          {business.fxEnabled && (
+            <>
+              <hr className="border-border" />
+              <CurrencySelectForm
+                currentCurrencyCode={business.localCurrencyCode}
+                referenceCurrency={business.foreignCurrencyCode}
+              />
+            </>
+          )}
+        </div>
 
-          <CurrencySelectForm
-            currentCurrencyCode={business.localCurrencyCode}
-            referenceCurrency={business.foreignCurrencyCode}
-          />
+        {business.fxEnabled && (
+          <div className="flex flex-col gap-4">
+            <div className="rounded-lg border border-border p-4 flex flex-col gap-1">
+              <span className="text-sm text-muted-foreground">Tasa actual</span>
+              <span className="text-2xl font-semibold">
+                {business.currentRate != null ? formatLocalCurrency(business.currentRate, business.localCurrencyCode) : "No configurada"}
+                {business.currentRate != null && (
+                  <span className="text-sm text-muted-foreground font-normal"> / {referenceSymbol}</span>
+                )}
+              </span>
+              <span className="text-xs text-muted-foreground">
+                {business.currentRateUpdatedAt
+                  ? `Última actualización: ${formatDate(business.currentRateUpdatedAt)}`
+                  : "Nunca se ha configurado"}
+              </span>
+            </div>
 
-          <div className="rounded-lg border border-border p-4 flex flex-col gap-1 max-w-sm">
-            <span className="text-sm text-muted-foreground">Tasa actual</span>
-            <span className="text-2xl font-semibold">
-              {business.currentRate != null ? formatLocalCurrency(business.currentRate, business.localCurrencyCode) : "No configurada"}
-              {business.currentRate != null && (
-                <span className="text-sm text-muted-foreground font-normal"> / {referenceSymbol}</span>
-              )}
-            </span>
-            <span className="text-xs text-muted-foreground">
-              {business.currentRateUpdatedAt
-                ? `Última actualización: ${formatDate(business.currentRateUpdatedAt)}`
-                : "Nunca se ha configurado"}
-            </span>
+            {stale && (
+              <p className="text-sm text-destructive">
+                {business.currentRate != null
+                  ? "No has actualizado la tasa hoy. Los precios en tu moneda local pueden estar desactualizados."
+                  : "Configura una tasa para poder ver precios en tu moneda local y completar citas."}
+              </p>
+            )}
+
+            {business.localCurrencyCode === "VES" && (
+              <p className="text-xs text-muted-foreground -mt-2">
+                Se actualiza sola todos los días con la tasa oficial del BCV. También puedes hacerlo tú mismo, o
+                escribirla a mano abajo.
+              </p>
+            )}
+            {business.localCurrencyCode === "VES" && <BcvRateButton currency={business.foreignCurrencyCode} />}
+
+            <ExchangeRateForm
+              currentRate={business.currentRate}
+              currencyCode={business.localCurrencyCode}
+              foreignCurrencyCode={business.foreignCurrencyCode}
+            />
           </div>
-
-          {stale && (
-            <p className="text-sm text-destructive max-w-sm">
-              {business.currentRate != null
-                ? "No has actualizado la tasa hoy. Los precios en tu moneda local pueden estar desactualizados."
-                : "Configura una tasa para poder ver precios en tu moneda local y completar citas."}
-            </p>
-          )}
-
-          {business.localCurrencyCode === "VES" && (
-            <p className="text-xs text-muted-foreground max-w-sm">
-              Se actualiza sola todos los días con la tasa oficial del BCV. También puedes hacerlo tú mismo, o
-              escribirla a mano abajo.
-            </p>
-          )}
-          {business.localCurrencyCode === "VES" && <BcvRateButton currency={business.foreignCurrencyCode} />}
-
-          <ExchangeRateForm
-            currentRate={business.currentRate}
-            currencyCode={business.localCurrencyCode}
-            foreignCurrencyCode={business.foreignCurrencyCode}
-          />
-        </>
-      )}
+        )}
+      </div>
     </section>
   );
 }

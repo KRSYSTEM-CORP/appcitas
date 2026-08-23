@@ -105,16 +105,16 @@ export function PlatformSettingsForm({
       </div>
       <div className="flex flex-col gap-1.5">
         <Label>QR de Binance Pay</Label>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3">
           {binanceQrDataUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={binanceQrDataUrl}
               alt="QR de Binance Pay"
-              className="h-20 w-20 rounded object-cover border"
+              className="h-20 w-20 shrink-0 rounded object-cover border"
             />
           ) : (
-            <div className="h-20 w-20 rounded border flex items-center justify-center text-xs text-muted-foreground text-center">
+            <div className="h-20 w-20 shrink-0 rounded border flex items-center justify-center text-xs text-muted-foreground text-center">
               Sin QR
             </div>
           )}
@@ -123,7 +123,7 @@ export function PlatformSettingsForm({
             type="file"
             accept="image/*"
             onChange={handleQrFileChange}
-            className="text-sm"
+            className="text-sm min-w-0 max-w-full"
           />
         </div>
       </div>

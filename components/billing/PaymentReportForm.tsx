@@ -141,16 +141,16 @@ export function PaymentReportForm() {
 
       <div className="flex flex-col gap-1.5">
         <Label>Comprobante de pago (obligatorio)</Label>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3">
           {proofImageDataUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={proofImageDataUrl}
               alt="Comprobante"
-              className="h-16 w-16 rounded object-cover border border-border"
+              className="h-16 w-16 shrink-0 rounded object-cover border border-border"
             />
           ) : (
-            <div className="h-16 w-16 rounded border border-border flex items-center justify-center text-xs text-muted-foreground text-center">
+            <div className="h-16 w-16 shrink-0 rounded border border-border flex items-center justify-center text-xs text-muted-foreground text-center">
               Sin foto
             </div>
           )}
@@ -160,7 +160,7 @@ export function PaymentReportForm() {
             accept="image/*"
             onChange={handleFileChange}
             required
-            className="text-sm"
+            className="text-sm min-w-0 max-w-full"
           />
         </div>
       </div>

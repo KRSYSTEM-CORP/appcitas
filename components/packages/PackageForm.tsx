@@ -104,188 +104,207 @@ export function PackageForm({
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-4 max-w-md">
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor="specialistId">Especialista</Label>
-        <select
-          id="specialistId"
-          value={specialistId}
-          onChange={(e) => {
-            setSpecialistId(e.target.value);
-            setServiceId("");
-          }}
-          className="flex h-10 w-full rounded-md border border-input bg-card px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          {specialists.length === 0 && <option value="">No hay especialistas activos</option>}
-          {specialists.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.displayName}
-            </option>
-          ))}
-        </select>
-      </div>
+    <form onSubmit={handleSubmit} className="flex flex-col gap-4 max-w-5xl">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="flex flex-col gap-4 rounded-lg border border-border p-4">
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="specialistId">Especialista</Label>
+            <select
+              id="specialistId"
+              value={specialistId}
+              onChange={(e) => {
+                setSpecialistId(e.target.value);
+                setServiceId("");
+              }}
+              className="flex h-10 w-full rounded-md border border-input bg-card px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              {specialists.length === 0 && <option value="">No hay especialistas activos</option>}
+              {specialists.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.displayName}
+                </option>
+              ))}
+            </select>
+          </div>
 
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor="serviceId">Servicio</Label>
-        <select
-          id="serviceId"
-          value={serviceId}
-          onChange={(e) => setServiceId(e.target.value)}
-          className="flex h-10 w-full rounded-md border border-input bg-card px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <option value="">
-            {availableServices.length === 0 ? "Este especialista no tiene servicios asignados" : "Elige un servicio"}
-          </option>
-          {availableServices.map((s) => {
-            const localCents = serviceLocalPriceCents(s, { localCurrencyCode: currencyCode }, rate);
-            const priceLabel =
-              localCents != null && s.priceCurrencyCode !== currencyCode
-                ? `${formatMoney(s.basePriceCents, s.priceCurrencyCode)} (≈ ${formatMoney(localCents, currencyCode)})`
-                : formatMoney(s.basePriceCents, s.priceCurrencyCode);
-            return (
-              <option key={s.id} value={s.id}>
-                {s.name} · {formatDuration(s.durationMinutes)} · {priceLabel}
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="serviceId">Servicio</Label>
+            <select
+              id="serviceId"
+              value={serviceId}
+              onChange={(e) => setServiceId(e.target.value)}
+              className="flex h-10 w-full rounded-md border border-input bg-card px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <option value="">
+                {availableServices.length === 0
+                  ? "Este especialista no tiene servicios asignados"
+                  : "Elige un servicio"}
               </option>
-            );
-          })}
-        </select>
-      </div>
-
-      <div className="flex gap-3">
-        <div className="flex flex-col gap-1.5 flex-1">
-          <Label htmlFor="dateKey">Primera sesión</Label>
-          <Input id="dateKey" type="date" value={dateKey} onChange={(e) => setDateKey(e.target.value)} required />
-        </div>
-        <div className="flex flex-col gap-1.5 flex-1">
-          <Label htmlFor="time">Hora</Label>
-          <Input id="time" type="time" value={time} onChange={(e) => setTime(e.target.value)} required />
-        </div>
-      </div>
-
-      <div className="flex gap-3">
-        <div className="flex flex-col gap-1.5 flex-1">
-          <Label htmlFor="totalSessions">Número de sesiones</Label>
-          <Input
-            id="totalSessions"
-            type="number"
-            min="2"
-            max="52"
-            value={totalSessions}
-            onChange={(e) => setTotalSessions(e.target.value)}
-            required
-          />
-        </div>
-        <div className="flex flex-col gap-1.5 flex-1">
-          <Label htmlFor="intervalDays">Cada cuántos días</Label>
-          <Input
-            id="intervalDays"
-            type="number"
-            min="1"
-            max="90"
-            value={intervalDays}
-            onChange={(e) => setIntervalDays(e.target.value)}
-            required
-          />
-        </div>
-      </div>
-      <p className="text-xs text-muted-foreground -mt-2">
-        Se crearán {totalSessions || 0} citas, una cada {intervalDays || 0} día(s), a la misma hora.
-      </p>
-
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor="clientChoice">Cliente</Label>
-        <select
-          id="clientChoice"
-          value={clientChoice}
-          onChange={(e) => setClientChoice(e.target.value)}
-          className="flex h-10 w-full rounded-md border border-input bg-card px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <option value={NEW_CLIENT}>+ Nuevo cliente</option>
-          {clients.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.firstName} {c.lastName} · {c.phone}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      {clientChoice === NEW_CLIENT && (
-        <div className="flex gap-3">
-          <div className="flex flex-col gap-1.5 flex-1">
-            <Label htmlFor="newFirstName">Nombre</Label>
-            <Input id="newFirstName" value={newFirstName} onChange={(e) => setNewFirstName(e.target.value)} required />
+              {availableServices.map((s) => {
+                const localCents = serviceLocalPriceCents(s, { localCurrencyCode: currencyCode }, rate);
+                const priceLabel =
+                  localCents != null && s.priceCurrencyCode !== currencyCode
+                    ? `${formatMoney(s.basePriceCents, s.priceCurrencyCode)} (≈ ${formatMoney(localCents, currencyCode)})`
+                    : formatMoney(s.basePriceCents, s.priceCurrencyCode);
+                return (
+                  <option key={s.id} value={s.id}>
+                    {s.name} · {formatDuration(s.durationMinutes)} · {priceLabel}
+                  </option>
+                );
+              })}
+            </select>
           </div>
-          <div className="flex flex-col gap-1.5 flex-1">
-            <Label htmlFor="newLastName">Apellido</Label>
-            <Input id="newLastName" value={newLastName} onChange={(e) => setNewLastName(e.target.value)} required />
-          </div>
-          <div className="flex flex-col gap-1.5 flex-1">
-            <Label htmlFor="newPhone">Teléfono</Label>
-            <Input id="newPhone" value={newPhone} onChange={(e) => setNewPhone(e.target.value)} required />
-          </div>
-        </div>
-      )}
 
-      <div className="flex flex-col gap-1.5">
-        <Label>Forma de pago del paquete</Label>
-        <div className="flex flex-col gap-2">
-          <label className="flex items-start gap-2 text-sm">
-            <input
-              type="radio"
-              name="paymentMode"
-              checked={paymentMode === "PER_SESSION"}
-              onChange={() => setPaymentMode("PER_SESSION")}
-              className="mt-0.5"
-            />
-            <span>
-              Pago por sesión — el cliente paga cada cita que asista, igual que una cita normal.
-            </span>
-          </label>
-          <label className="flex items-start gap-2 text-sm">
-            <input
-              type="radio"
-              name="paymentMode"
-              checked={paymentMode === "PACKAGE"}
-              onChange={() => setPaymentMode("PACKAGE")}
-              className="mt-0.5"
-            />
-            <span>Un solo pago por todo el paquete, sin importar cuántas sesiones asista.</span>
-          </label>
-        </div>
-      </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="dateKey">Primera sesión</Label>
+              <Input id="dateKey" type="date" value={dateKey} onChange={(e) => setDateKey(e.target.value)} required />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="time">Hora</Label>
+              <Input id="time" type="time" value={time} onChange={(e) => setTime(e.target.value)} required />
+            </div>
+          </div>
 
-      {paymentMode === "PACKAGE" && (
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="packagePrice">
-            Precio total del paquete {selectedService && `(${selectedService.priceCurrencyCode})`}
-          </Label>
-          <Input
-            id="packagePrice"
-            type="number"
-            min="0"
-            step="0.01"
-            value={packagePrice}
-            onChange={(e) => setPackagePrice(e.target.value)}
-            placeholder={suggestedTotal != null ? suggestedTotal.toFixed(2) : undefined}
-            required
-          />
-          {suggestedTotal != null && (
-            <p className="text-xs text-muted-foreground">
-              Precio del servicio × sesiones: {formatMoney(Math.round(suggestedTotal * 100), selectedService!.priceCurrencyCode)}
-            </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="totalSessions">Número de sesiones</Label>
+              <Input
+                id="totalSessions"
+                type="number"
+                min="2"
+                max="52"
+                value={totalSessions}
+                onChange={(e) => setTotalSessions(e.target.value)}
+                required
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="intervalDays">Cada cuántos días</Label>
+              <Input
+                id="intervalDays"
+                type="number"
+                min="1"
+                max="90"
+                value={intervalDays}
+                onChange={(e) => setIntervalDays(e.target.value)}
+                required
+              />
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground -mt-2">
+            Se crearán {totalSessions || 0} citas, una cada {intervalDays || 0} día(s), a la misma hora.
+          </p>
+        </div>
+
+        <div className="flex flex-col gap-4 rounded-lg border border-border p-4">
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="clientChoice">Cliente</Label>
+            <select
+              id="clientChoice"
+              value={clientChoice}
+              onChange={(e) => setClientChoice(e.target.value)}
+              className="flex h-10 w-full rounded-md border border-input bg-card px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <option value={NEW_CLIENT}>+ Nuevo cliente</option>
+              {clients.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.firstName} {c.lastName} · {c.phone}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {clientChoice === NEW_CLIENT && (
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="newFirstName">Nombre</Label>
+                <Input
+                  id="newFirstName"
+                  value={newFirstName}
+                  onChange={(e) => setNewFirstName(e.target.value)}
+                  required
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="newLastName">Apellido</Label>
+                <Input
+                  id="newLastName"
+                  value={newLastName}
+                  onChange={(e) => setNewLastName(e.target.value)}
+                  required
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="newPhone">Teléfono</Label>
+                <Input id="newPhone" value={newPhone} onChange={(e) => setNewPhone(e.target.value)} required />
+              </div>
+            </div>
           )}
-        </div>
-      )}
 
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor="notes">Notas (opcional)</Label>
-        <textarea
-          id="notes"
-          value={notes}
-          onChange={(e) => setNotes(e.target.value)}
-          rows={2}
-          className="flex w-full rounded-md border border-input bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        />
+          <div className="flex flex-col gap-1.5">
+            <Label>Forma de pago del paquete</Label>
+            <div className="flex flex-col gap-2">
+              <label className="flex items-start gap-2 text-sm">
+                <input
+                  type="radio"
+                  name="paymentMode"
+                  checked={paymentMode === "PER_SESSION"}
+                  onChange={() => setPaymentMode("PER_SESSION")}
+                  className="mt-0.5"
+                />
+                <span>
+                  Pago por sesión — el cliente paga cada cita que asista, igual que una cita normal.
+                </span>
+              </label>
+              <label className="flex items-start gap-2 text-sm">
+                <input
+                  type="radio"
+                  name="paymentMode"
+                  checked={paymentMode === "PACKAGE"}
+                  onChange={() => setPaymentMode("PACKAGE")}
+                  className="mt-0.5"
+                />
+                <span>Un solo pago por todo el paquete, sin importar cuántas sesiones asista.</span>
+              </label>
+            </div>
+          </div>
+
+          {paymentMode === "PACKAGE" && (
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="packagePrice">
+                Precio total del paquete {selectedService && `(${selectedService.priceCurrencyCode})`}
+              </Label>
+              <Input
+                id="packagePrice"
+                type="number"
+                min="0"
+                step="0.01"
+                value={packagePrice}
+                onChange={(e) => setPackagePrice(e.target.value)}
+                placeholder={suggestedTotal != null ? suggestedTotal.toFixed(2) : undefined}
+                required
+              />
+              {suggestedTotal != null && (
+                <p className="text-xs text-muted-foreground">
+                  Precio del servicio × sesiones:{" "}
+                  {formatMoney(Math.round(suggestedTotal * 100), selectedService!.priceCurrencyCode)}
+                </p>
+              )}
+            </div>
+          )}
+
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="notes">Notas (opcional)</Label>
+            <textarea
+              id="notes"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              rows={2}
+              className="flex w-full rounded-md border border-input bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            />
+          </div>
+        </div>
       </div>
 
       {error && <p className="text-sm text-destructive">{error}</p>}

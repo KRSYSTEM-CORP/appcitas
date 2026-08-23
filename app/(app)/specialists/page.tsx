@@ -7,7 +7,7 @@ export default async function SpecialistsPage() {
   const specialists = await listSpecialists();
 
   return (
-    <div className="flex flex-col gap-4 p-6 max-w-3xl mx-auto w-full">
+    <div className="flex flex-col gap-4 p-6 w-full">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold">Especialistas</h1>

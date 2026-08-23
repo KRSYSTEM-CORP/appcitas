@@ -14,7 +14,7 @@ export default async function EditSpecialistPage({ params }: { params: Promise<{
   if (!specialist || !specialistHours) notFound();
 
   return (
-    <div className="flex flex-col gap-6 p-6 max-w-3xl mx-auto w-full">
+    <div className="flex flex-col gap-6 p-6 w-full">
       <div>
         <h1 className="text-2xl font-semibold">Editar especialista</h1>
       </div>

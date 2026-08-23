@@ -124,7 +124,7 @@ export function ImportServicesForm({ defaultCurrencyCode }: { defaultCurrencyCod
   }
 
   return (
-    <div className="flex flex-col gap-4 max-w-3xl">
+    <div className="flex flex-col gap-4 max-w-5xl">
       <div className="flex flex-col gap-1.5 rounded-md border border-border p-4">
         <p className="text-sm text-muted-foreground">
           Sube un Excel (.xlsx) con tus servicios. Columnas esperadas:{" "}

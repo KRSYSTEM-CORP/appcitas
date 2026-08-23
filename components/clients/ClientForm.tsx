@@ -38,24 +38,24 @@ export function ClientForm({
   }
 
   return (
-    <form ref={formRef} action={handleSubmit} className="flex flex-col gap-3 max-w-sm">
-      <div className="flex gap-3">
-        <div className="flex flex-col gap-1.5 flex-1">
+    <form ref={formRef} action={handleSubmit} className="flex flex-col gap-3 max-w-4xl rounded-lg border border-border p-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="flex flex-col gap-1.5">
           <Label htmlFor="firstName">Nombre</Label>
           <Input id="firstName" name="firstName" defaultValue={client?.firstName} required />
         </div>
-        <div className="flex flex-col gap-1.5 flex-1">
+        <div className="flex flex-col gap-1.5">
           <Label htmlFor="lastName">Apellido</Label>
           <Input id="lastName" name="lastName" defaultValue={client?.lastName} required />
         </div>
-      </div>
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor="phone">Teléfono</Label>
-        <Input id="phone" name="phone" defaultValue={client?.phone} required />
-      </div>
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor="email">Correo (opcional)</Label>
-        <Input id="email" name="email" type="email" defaultValue={client?.email ?? ""} />
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="phone">Teléfono</Label>
+          <Input id="phone" name="phone" defaultValue={client?.phone} required />
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="email">Correo (opcional)</Label>
+          <Input id="email" name="email" type="email" defaultValue={client?.email ?? ""} />
+        </div>
       </div>
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="notes">Notas (opcional)</Label>

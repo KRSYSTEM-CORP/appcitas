@@ -61,7 +61,7 @@ export function BrandingForm({
   }
 
   return (
-    <form action={handleSubmit} className="flex flex-col gap-4 max-w-sm">
+    <form action={handleSubmit} className="flex flex-col gap-4 max-w-3xl">
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="businessNameInput">Nombre del negocio</Label>
         <Input
@@ -69,55 +69,64 @@ export function BrandingForm({
           value={businessName}
           onChange={(e) => setBusinessName(e.target.value)}
           required
+          className="max-w-sm"
         />
       </div>
 
       <div className="flex flex-col gap-1.5">
         <Label>Logo</Label>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3">
           {logoDataUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={logoDataUrl} alt="Logo" className="h-12 w-12 rounded object-cover border border-border" />
+            <img src={logoDataUrl} alt="Logo" className="h-12 w-12 shrink-0 rounded object-cover border border-border" />
           ) : (
-            <div className="h-12 w-12 rounded border border-border flex items-center justify-center text-xs text-muted-foreground">
+            <div className="h-12 w-12 shrink-0 rounded border border-border flex items-center justify-center text-xs text-muted-foreground">
               Sin logo
             </div>
           )}
-          <input ref={fileInputRef} type="file" accept="image/*" onChange={handleFileChange} className="text-sm" />
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            onChange={handleFileChange}
+            className="text-sm min-w-0 max-w-full"
+          />
         </div>
       </div>
 
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor="brandColorInput">Color de acento (botones, enlaces)</Label>
-        <div className="flex items-center gap-3">
-          <input
-            id="brandColorInput"
-            type="color"
-            value={brandColor}
-            onChange={(e) => setBrandColor(e.target.value)}
-            className="h-9 w-14 rounded border border-border cursor-pointer"
-          />
-          <span className="text-sm text-muted-foreground">{brandColor}</span>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="brandColorInput">Color de acento (botones, enlaces)</Label>
+          <div className="flex items-center gap-3">
+            <input
+              id="brandColorInput"
+              type="color"
+              value={brandColor}
+              onChange={(e) => setBrandColor(e.target.value)}
+              className="h-9 w-14 rounded border border-border cursor-pointer"
+            />
+            <span className="text-sm text-muted-foreground">{brandColor}</span>
+          </div>
         </div>
-      </div>
 
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor="brandBackgroundInput">Color de fondo</Label>
-        <div className="flex items-center gap-3">
-          <input
-            id="brandBackgroundInput"
-            type="color"
-            value={brandBackground}
-            onChange={(e) => setBrandBackground(e.target.value)}
-            className="h-9 w-14 rounded border border-border cursor-pointer"
-          />
-          <span className="text-sm text-muted-foreground">{brandBackground}</span>
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="brandBackgroundInput">Color de fondo</Label>
+          <div className="flex items-center gap-3">
+            <input
+              id="brandBackgroundInput"
+              type="color"
+              value={brandBackground}
+              onChange={(e) => setBrandBackground(e.target.value)}
+              className="h-9 w-14 rounded border border-border cursor-pointer"
+            />
+            <span className="text-sm text-muted-foreground">{brandBackground}</span>
+          </div>
         </div>
-        <p className="text-xs text-muted-foreground">
-          El resto de los colores (tarjetas, bordes, texto) se ajustan automáticamente para que se
-          sigan viendo bien, sea un fondo claro u oscuro.
-        </p>
       </div>
+      <p className="text-xs text-muted-foreground -mt-2">
+        El resto de los colores (tarjetas, bordes, texto) se ajustan automáticamente para que se
+        sigan viendo bien, sea un fondo claro u oscuro.
+      </p>
 
       {error && <p className="text-sm text-destructive">{error}</p>}
       {saved && !error && <p className="text-sm text-success">Personalización guardada</p>}

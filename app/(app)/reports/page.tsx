@@ -19,7 +19,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
   const report = await getReportsSummary(period);
 
   return (
-    <div className="flex flex-col gap-6 p-6 max-w-4xl mx-auto w-full">
+    <div className="flex flex-col gap-6 p-6 w-full">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-semibold">Reportes</h1>

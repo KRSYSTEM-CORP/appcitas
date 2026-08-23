@@ -11,7 +11,7 @@ export default async function EditServicePage({ params }: { params: Promise<{ id
   const currencyOptions = fx.fxEnabled ? [fx.foreignCurrencyCode, fx.localCurrencyCode] : [fx.localCurrencyCode];
 
   return (
-    <div className="flex flex-col gap-6 p-6 max-w-3xl mx-auto w-full">
+    <div className="flex flex-col gap-6 p-6 w-full">
       <div>
         <h1 className="text-2xl font-semibold">Editar servicio</h1>
       </div>

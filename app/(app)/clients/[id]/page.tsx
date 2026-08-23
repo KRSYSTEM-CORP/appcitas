@@ -10,7 +10,7 @@ export default async function EditClientPage({ params }: { params: Promise<{ id:
   if (!client) notFound();
 
   return (
-    <div className="flex flex-col gap-6 p-6 max-w-3xl mx-auto w-full">
+    <div className="flex flex-col gap-6 p-6 w-full">
       <div>
         <h1 className="text-2xl font-semibold">Editar cliente</h1>
       </div>

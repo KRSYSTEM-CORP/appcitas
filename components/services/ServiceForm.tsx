@@ -38,19 +38,20 @@ export function ServiceForm({
   }
 
   return (
-    <form action={handleSubmit} className="flex flex-col gap-4 max-w-md">
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor="name">Nombre del servicio</Label>
-        <Input id="name" name="name" defaultValue={service?.name} placeholder="Corte de cabello" required />
+    <form action={handleSubmit} className="flex flex-col gap-4 max-w-4xl rounded-lg border border-border p-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="name">Nombre del servicio</Label>
+          <Input id="name" name="name" defaultValue={service?.name} placeholder="Corte de cabello" required />
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="category">Categoría (opcional)</Label>
+          <Input id="category" name="category" defaultValue={service?.category ?? ""} placeholder="Cabello" />
+        </div>
       </div>
 
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor="category">Categoría (opcional)</Label>
-        <Input id="category" name="category" defaultValue={service?.category ?? ""} placeholder="Cabello" />
-      </div>
-
-      <div className="flex gap-3">
-        <div className="flex flex-col gap-1.5 flex-1">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="flex flex-col gap-1.5">
           <Label htmlFor="durationMinutes">Duración (min)</Label>
           <Input
             id="durationMinutes"
@@ -63,7 +64,7 @@ export function ServiceForm({
             required
           />
         </div>
-        <div className="flex flex-col gap-1.5 flex-1">
+        <div className="flex flex-col gap-1.5">
           <Label htmlFor="basePrice">Precio ({priceCurrencyCode})</Label>
           <div className="flex gap-2">
             <Input

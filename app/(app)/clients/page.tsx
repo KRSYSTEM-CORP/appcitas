@@ -7,7 +7,7 @@ export default async function ClientsPage() {
   const clients = await listClients();
 
   return (
-    <div className="flex flex-col gap-8 p-6 max-w-3xl mx-auto w-full">
+    <div className="flex flex-col gap-8 p-6 w-full">
       <div>
         <h1 className="text-2xl font-semibold">Clientes</h1>
         <p className="text-sm text-muted-foreground mt-1">

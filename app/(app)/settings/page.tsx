@@ -7,9 +7,14 @@ export default async function SettingsPage() {
 
   return (
     <div className="flex flex-col gap-8">
-      <section className="flex flex-col gap-3">
-        <h2 className="text-lg font-semibold">Acceso</h2>
-        <div className="flex flex-col gap-2 rounded-md border border-border bg-card p-4 max-w-sm text-sm">
+      <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div>
+          <h2 className="text-lg font-semibold">Acceso</h2>
+          <p className="text-sm text-muted-foreground mt-1">
+            El enlace de reservas y el código con el que tu equipo entra a KR Citas.
+          </p>
+        </div>
+        <div className="flex flex-col gap-2 rounded-md border border-border bg-card p-4 text-sm">
           <div className="flex justify-between gap-4 items-center">
             <span className="text-muted-foreground">Página de reservas</span>
             <Link
@@ -30,11 +35,13 @@ export default async function SettingsPage() {
         </div>
       </section>
 
-      <section className="flex flex-col gap-3">
-        <h2 className="text-lg font-semibold">Asignación de especialista</h2>
-        <p className="text-sm text-muted-foreground max-w-sm -mt-1">
-          ¿Quién decide qué especialista atiende cada cita reservada desde tu página pública?
-        </p>
+      <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div>
+          <h2 className="text-lg font-semibold">Asignación de especialista</h2>
+          <p className="text-sm text-muted-foreground mt-1">
+            ¿Quién decide qué especialista atiende cada cita reservada desde tu página pública?
+          </p>
+        </div>
         <SpecialistAssignmentModeForm initialMode={business.specialistAssignmentMode} />
       </section>
     </div>

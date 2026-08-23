@@ -49,7 +49,7 @@ export default async function AgendaPage({
         : MONTH_LABEL_FORMATTER.format(start);
 
   return (
-    <div className="flex flex-col gap-4 p-6 max-w-5xl mx-auto w-full">
+    <div className="flex flex-col gap-4 p-6 w-full">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-semibold">Agenda de {session.businessName}</h1>

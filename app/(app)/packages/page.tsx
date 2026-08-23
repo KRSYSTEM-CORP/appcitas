@@ -39,7 +39,7 @@ export default async function PackagesPage({
         : MONTH_LABEL_FORMATTER.format(start);
 
   return (
-    <div className="flex flex-col gap-4 p-6 max-w-4xl mx-auto w-full">
+    <div className="flex flex-col gap-4 p-6 w-full">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-semibold">Paquetes de sesiones</h1>

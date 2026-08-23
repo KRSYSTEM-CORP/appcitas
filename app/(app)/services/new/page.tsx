@@ -7,7 +7,7 @@ export default async function NewServicePage() {
   const currencyOptions = fx.fxEnabled ? [fx.foreignCurrencyCode, fx.localCurrencyCode] : [fx.localCurrencyCode];
 
   return (
-    <div className="flex flex-col gap-4 p-6 max-w-3xl mx-auto w-full">
+    <div className="flex flex-col gap-4 p-6 w-full">
       <div>
         <h1 className="text-2xl font-semibold">Nuevo servicio</h1>
         <p className="text-sm text-muted-foreground mt-1">Agrégalo a tu catálogo para poder asignarlo a un especialista.</p>

@@ -50,39 +50,43 @@ export function SpecialistForm({
   }
 
   return (
-    <form action={handleSubmit} className="flex flex-col gap-4 max-w-md">
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor="displayName">Nombre</Label>
-        <Input id="displayName" name="displayName" defaultValue={specialist?.displayName} required />
-      </div>
-
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor="bio">Descripción (opcional)</Label>
-        <textarea
-          id="bio"
-          name="bio"
-          defaultValue={specialist?.bio ?? ""}
-          rows={2}
-          className="flex w-full rounded-md border border-input bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        />
-      </div>
-
-      <div className="flex flex-col gap-1.5">
-        <Label>Servicios que puede realizar</Label>
-        {services.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            Aún no tienes servicios activos. Crea uno primero en Servicios.
-          </p>
-        ) : (
-          <div className="flex flex-col gap-1.5 rounded-md border border-border p-3">
-            {services.map((s) => (
-              <label key={s.id} className="flex items-center gap-2 text-sm">
-                <input type="checkbox" checked={selected.has(s.id)} onChange={() => toggleService(s.id)} />
-                {s.name}
-              </label>
-            ))}
+    <form action={handleSubmit} className="flex flex-col gap-4 max-w-4xl rounded-lg border border-border p-4">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="displayName">Nombre</Label>
+            <Input id="displayName" name="displayName" defaultValue={specialist?.displayName} required />
           </div>
-        )}
+
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="bio">Descripción (opcional)</Label>
+            <textarea
+              id="bio"
+              name="bio"
+              defaultValue={specialist?.bio ?? ""}
+              rows={4}
+              className="flex w-full rounded-md border border-input bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            />
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <Label>Servicios que puede realizar</Label>
+          {services.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              Aún no tienes servicios activos. Crea uno primero en Servicios.
+            </p>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 rounded-md border border-border p-3">
+              {services.map((s) => (
+                <label key={s.id} className="flex items-center gap-2 text-sm">
+                  <input type="checkbox" checked={selected.has(s.id)} onChange={() => toggleService(s.id)} />
+                  {s.name}
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       {error && <p className="text-sm text-destructive">{error}</p>}

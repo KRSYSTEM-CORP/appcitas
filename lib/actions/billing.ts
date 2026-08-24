@@ -74,13 +74,11 @@ export async function listMyPaymentReports() {
 }
 
 // A business owner's self-reported claim of having paid the maintenance fee
-// externally, with a required proof-of-payment image. Stays PENDING until a
-// super admin reviews it from /admin — this alone never changes the
-// business' billing state or unblocks it. This is now the ONLY way a payment
-// gets recorded from the business side (no automated checkout of any kind) —
-// the billing page also tells the business to send the same proof to KR
-// System's WhatsApp, which is how the super admin actually finds out to go
-// review it.
+// externally. Stays PENDING until a super admin reviews it from /admin —
+// this alone never changes the business' billing state or unblocks it. The
+// proof-of-payment image is no longer collected in-app; the billing page
+// tells the business to send it by WhatsApp instead, which is how the super
+// admin actually finds out to go review it.
 export async function submitPaymentReport(input: unknown): Promise<ActionResult> {
   const { businessId, userId } = await requireBusinessUser();
   const parsed = PaymentReportSchema.safeParse(input);
@@ -92,7 +90,6 @@ export async function submitPaymentReport(input: unknown): Promise<ActionResult>
     data: {
       businessId,
       reportedById: userId,
-      proofImageDataUrl: parsed.data.proofImageDataUrl,
       note: parsed.data.note,
       lines: {
         create: parsed.data.lines.map((line) => ({

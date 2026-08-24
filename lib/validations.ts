@@ -199,12 +199,10 @@ const PaymentReportLineSchema = z.object({
 export const PaymentReportSchema = z
   .object({
     lines: z.array(PaymentReportLineSchema),
-    proofImageDataUrl: z
-      .string()
-      .trim()
-      .min(1, "El comprobante de pago es obligatorio")
-      .refine((v) => v.startsWith("data:image/"), "Comprobante inválido")
-      .refine((v) => v.length < 3_000_000, "El comprobante es demasiado grande"),
+    // No longer collected in-app — the comprobante is sent by WhatsApp
+    // instead (see app/(app)/billing/page.tsx). Kept optional, not removed,
+    // so PaymentReport.proofImageDataUrl still displays for reports
+    // submitted before this change.
     note: z.preprocess(blankToUndefined, z.string().trim().optional()),
   })
   .superRefine((data, ctx) => {

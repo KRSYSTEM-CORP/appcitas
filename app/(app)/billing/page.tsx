@@ -103,11 +103,8 @@ export default async function BillingPage() {
             <p className="text-sm font-medium">Pasos obligatorios para activar tu suscripción:</p>
             <ol className="text-sm text-muted-foreground list-decimal list-inside flex flex-col gap-1">
               <li>Paga por Binance (USDT), escaneando el QR o con el ID de arriba.</li>
-              <li>Sube tu comprobante de pago aquí abajo (obligatorio).</li>
-              <li>
-                Envía el mismo comprobante también por WhatsApp (obligatorio) — así te confirmamos
-                más rápido.
-              </li>
+              <li>Completa el formulario de abajo con los datos del pago.</li>
+              <li>Envía tu comprobante de pago por WhatsApp (obligatorio) — así te confirmamos más rápido.</li>
             </ol>
             <a
               href={`https://wa.me/${WHATSAPP_PHONE}?text=${encodeURIComponent(

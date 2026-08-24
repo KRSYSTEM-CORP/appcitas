@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,7 +8,6 @@ import { Label } from "@/components/ui/label";
 import { submitPaymentReport } from "@/lib/actions/billing";
 import { PAYMENT_METHOD_LABELS } from "@/lib/format";
 import { PAYMENT_METHODS_REQUIRING_REFERENCE } from "@/lib/validations";
-import { resizeImageToDataUrl } from "@/lib/image-utils";
 import type { PaymentMethod } from "@prisma/client";
 
 // The subscription only accepts this one rail now — no more cash, card,
@@ -19,17 +18,13 @@ const BILLING_PAYMENT_METHODS: PaymentMethod[] = ["BINANCE"];
 
 type ReportLine = { paymentMethod: PaymentMethod; amount: string; reference: string };
 
-const MAX_DIMENSION = 1400;
-
 export function PaymentReportForm() {
   const [isPending, startTransition] = useTransition();
   const router = useRouter();
   const [lines, setLines] = useState<ReportLine[]>([{ paymentMethod: "BINANCE", amount: "", reference: "" }]);
-  const [proofImageDataUrl, setProofImageDataUrl] = useState("");
   const [note, setNote] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   function updateLine(i: number, patch: Partial<ReportLine>) {
     setLines((prev) => prev.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
@@ -44,22 +39,6 @@ export function PaymentReportForm() {
     setLines((prev) => prev.filter((_, idx) => idx !== i));
   }
 
-  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    try {
-      const dataUrl = await resizeImageToDataUrl(file, {
-        maxDimension: MAX_DIMENSION,
-        format: "image/jpeg",
-        quality: 0.7,
-      });
-      setProofImageDataUrl(dataUrl);
-      setSubmitted(false);
-    } catch {
-      setError("No se pudo procesar la imagen. Intenta con otra foto.");
-    }
-  }
-
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
@@ -70,7 +49,6 @@ export function PaymentReportForm() {
           amount: l.amount,
           reference: l.reference,
         })),
-        proofImageDataUrl,
         note,
       });
       if (!result.success) {
@@ -78,9 +56,7 @@ export function PaymentReportForm() {
         return;
       }
       setLines([{ paymentMethod: "BINANCE", amount: "", reference: "" }]);
-      setProofImageDataUrl("");
       setNote("");
-      if (fileInputRef.current) fileInputRef.current.value = "";
       setSubmitted(true);
       router.refresh();
     });
@@ -140,32 +116,6 @@ export function PaymentReportForm() {
       </Button>
 
       <div className="flex flex-col gap-1.5">
-        <Label>Comprobante de pago (obligatorio)</Label>
-        <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-          {proofImageDataUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={proofImageDataUrl}
-              alt="Comprobante"
-              className="h-16 w-16 shrink-0 rounded object-cover border border-border"
-            />
-          ) : (
-            <div className="h-16 w-16 shrink-0 rounded border border-border flex items-center justify-center text-xs text-muted-foreground text-center">
-              Sin foto
-            </div>
-          )}
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            onChange={handleFileChange}
-            required
-            className="text-sm min-w-0 max-w-full"
-          />
-        </div>
-      </div>
-
-      <div className="flex flex-col gap-1.5">
         <Label htmlFor="report-note">Nota (opcional)</Label>
         <Input
           id="report-note"
@@ -181,7 +131,8 @@ export function PaymentReportForm() {
       {error && <p className="text-sm text-destructive">{error}</p>}
       {submitted && !error && (
         <p className="text-sm text-muted-foreground">
-          Reporte enviado. El super admin lo revisará y tu cuenta se desbloqueará al ser aprobado.
+          Reporte enviado. No olvides enviar también el comprobante por WhatsApp — el super admin lo
+          revisará y tu cuenta se desbloqueará al ser aprobado.
         </p>
       )}
       <Button type="submit" disabled={isPending}>

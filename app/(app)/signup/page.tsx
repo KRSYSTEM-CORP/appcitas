@@ -1,4 +1,5 @@
 import { SignupForm } from "@/components/auth/SignupForm";
+import { TrialBadge } from "@/components/auth/TrialBadge";
 import { SiteFooter } from "@/components/layout/SiteFooter";
 import { WHATSAPP_URL } from "@/lib/legal";
 import { googleOAuthConfigured } from "@/lib/google-oauth";
@@ -12,6 +13,7 @@ export default async function SignupPage({
   return (
     <div className="flex flex-col min-h-full">
       <div className="flex-1 flex flex-col gap-6 p-6 py-16">
+        <TrialBadge />
         <div className="text-center flex flex-col items-center gap-3">
           <div className="rounded-2xl bg-gradient-to-br from-primary to-[color-mix(in_oklch,var(--primary),black_20%)] p-3 shadow-lg shadow-primary/20">
             {/* eslint-disable-next-line @next/next/no-img-element */}

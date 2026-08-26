@@ -47,9 +47,9 @@ export function ExchangeRateForm({
           min={0}
           step="0.0001"
           defaultValue={currentRate ?? ""}
-          placeholder="Ej. 45.0000"
           required
         />
+        <p className="text-xs text-muted-foreground">Ej. 45.0000</p>
       </div>
 
       {error && <p className="text-sm text-destructive">{error}</p>}

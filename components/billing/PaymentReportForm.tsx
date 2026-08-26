@@ -103,8 +103,8 @@ export function PaymentReportForm() {
                   id={`report-reference-${i}`}
                   value={line.reference}
                   onChange={(e) => updateLine(i, { reference: e.target.value })}
-                  placeholder="Ej. 001234567"
                 />
+                <p className="text-xs text-muted-foreground">Ej. 001234567</p>
               </div>
             )}
           </div>
@@ -124,8 +124,8 @@ export function PaymentReportForm() {
             setNote(e.target.value);
             setSubmitted(false);
           }}
-          placeholder="Ej. Pagué el 15 de julio por Binance"
         />
+        <p className="text-xs text-muted-foreground">Ej. Pagué el 15 de julio por Binance</p>
       </div>
 
       {error && <p className="text-sm text-destructive">{error}</p>}

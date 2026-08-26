@@ -96,8 +96,8 @@ export function PlatformSettingsForm({
             setDefaultFee(e.target.value);
             setSaved(false);
           }}
-          placeholder="Ej. 25.00"
         />
+        <p className="text-xs text-muted-foreground">Ej. 25.00</p>
         <p className="text-xs text-muted-foreground">
           Se aplica automáticamente a todo negocio nuevo al aprobarlo, salvo que le pongas un
           precio distinto después.
@@ -136,8 +136,8 @@ export function PlatformSettingsForm({
             setBinanceId(e.target.value);
             setSaved(false);
           }}
-          placeholder="Ej. 123456789"
         />
+        <p className="text-xs text-muted-foreground">Ej. 123456789</p>
       </div>
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="platform-instructions">Notas adicionales (opcional)</Label>
@@ -149,8 +149,10 @@ export function PlatformSettingsForm({
             setSaved(false);
           }}
           rows={4}
-          placeholder="Ej. Solo en horario laboral, confirma por WhatsApp antes de enviar"
         />
+        <p className="text-xs text-muted-foreground">
+          Ej. Solo en horario laboral, confirma por WhatsApp antes de enviar
+        </p>
       </div>
       {error && <p className="text-sm text-destructive">{error}</p>}
       {saved && !error && <p className="text-sm text-muted-foreground">Guardado.</p>}
@@ -266,10 +268,11 @@ function PendingReportRow({
           </div>
           {rejectOpen && (
             <div className="flex flex-col gap-2 w-48">
+              <Label htmlFor={`review-note-${r.id}`}>Motivo (opcional)</Label>
               <Input
+                id={`review-note-${r.id}`}
                 value={reviewNote}
                 onChange={(e) => setReviewNote(e.target.value)}
-                placeholder="Motivo (opcional)"
               />
               {error && <p className="text-xs text-destructive">{error}</p>}
               <Button size="sm" variant="destructive" disabled={isRejecting} onClick={handleReject}>

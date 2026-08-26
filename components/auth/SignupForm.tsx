@@ -55,7 +55,8 @@ export function SignupForm({ googleConfigured, authError }: { googleConfigured: 
       <form action={handleSubmit} className="flex flex-col gap-4">
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="businessName">Nombre del negocio</Label>
-          <Input id="businessName" name="businessName" placeholder="Salón Bella Vista" required />
+          <Input id="businessName" name="businessName" required />
+          <p className="text-xs text-muted-foreground">Ej. Salón Bella Vista</p>
         </div>
 
         <div className="flex flex-col gap-1.5">
@@ -63,14 +64,13 @@ export function SignupForm({ googleConfigured, authError }: { googleConfigured: 
           <Input
             id="subdomain"
             name="subdomain"
-            placeholder="bella-vista"
             pattern="[a-z0-9-]+"
             value={subdomain}
             onChange={(e) => setSubdomain(e.target.value)}
             required
           />
           <p className="text-xs text-muted-foreground">
-            Tu página de reservas: /book/{subdomain || "tu-subdominio"}
+            Ej. bella-vista — tu página de reservas: /book/{subdomain || "bella-vista"}
           </p>
         </div>
 

@@ -265,9 +265,11 @@ export function PaymentForm({
                   id={`payment-reference-${line.id}`}
                   value={line.reference}
                   onChange={(e) => updateLine(line.id, { reference: e.target.value })}
-                  placeholder={line.method === "BINANCE" ? "Ej. 12345678" : "Ej. 001234567"}
                   className="h-8 text-sm"
                 />
+                <p className="text-xs text-muted-foreground">
+                  {line.method === "BINANCE" ? "Ej. 12345678" : "Ej. 001234567"}
+                </p>
               </div>
             )}
           </div>

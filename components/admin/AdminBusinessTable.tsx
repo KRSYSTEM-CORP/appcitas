@@ -231,8 +231,8 @@ function BusinessRow({
                   id={`pay-note-${b.id}`}
                   value={payNote}
                   onChange={(e) => setPayNote(e.target.value)}
-                  placeholder="Ej. Transferencia ref. 001234567"
                 />
+                <p className="text-xs text-muted-foreground">Ej. Transferencia ref. 001234567</p>
               </div>
               {payError && <p className="text-xs text-destructive">{payError}</p>}
               <Button size="sm" disabled={isPaying} onClick={handleRecordPayment}>

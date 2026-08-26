@@ -42,11 +42,13 @@ export function ServiceForm({
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="name">Nombre del servicio</Label>
-          <Input id="name" name="name" defaultValue={service?.name} placeholder="Corte de cabello" required />
+          <Input id="name" name="name" defaultValue={service?.name} required />
+          <p className="text-xs text-muted-foreground">Ej. Corte de cabello</p>
         </div>
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="category">Categoría (opcional)</Label>
-          <Input id="category" name="category" defaultValue={service?.category ?? ""} placeholder="Cabello" />
+          <Input id="category" name="category" defaultValue={service?.category ?? ""} />
+          <p className="text-xs text-muted-foreground">Ej. Cabello</p>
         </div>
       </div>
 

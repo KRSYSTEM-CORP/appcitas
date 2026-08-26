@@ -44,8 +44,8 @@ export function AnnouncementForm({ recipientCount }: { recipientCount: number })
           id="announcement-subject"
           value={subject}
           onChange={(e) => setSubject(e.target.value)}
-          placeholder="Ej. Nueva función disponible en KR Citas"
         />
+        <p className="text-xs text-muted-foreground">Ej. Nueva función disponible en KR Citas</p>
       </div>
 
       <div className="flex flex-col gap-1.5">

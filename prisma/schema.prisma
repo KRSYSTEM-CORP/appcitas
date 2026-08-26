@@ -208,6 +208,22 @@ model PasswordResetToken {
   @@index([userId])
 }
 
+// A single failed/attempted hit against a rate-limited auth action (login,
+// password-reset request) — see lib/rate-limit.ts. `key` combines a scope
+// prefix with the identifier being limited (email) so the same table serves
+// every limited action without colliding. Not tenant-scoped (this tracks
+// abuse attempts against the login surface itself, before any business
+// context exists) — same reasoning as User/Business being outside Row-Level
+// Security. Old rows are harmless clutter, not a correctness issue, since
+// every read here is windowed by createdAt.
+model LoginAttempt {
+  id        String   @id @default(cuid())
+  key       String
+  createdAt DateTime @default(now())
+
+  @@index([key, createdAt])
+}
+
 model Specialist {
   id             String   @id @default(cuid())
   businessId     String

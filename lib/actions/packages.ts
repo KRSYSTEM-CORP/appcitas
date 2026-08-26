@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { prisma } from "@/lib/prisma";
+import { withTenant } from "@/lib/tenant-db";
 import { requireSession } from "@/lib/session";
 import { dateKeyOf, zonedHM, zonedTimeToUtc } from "@/lib/timezone";
 import { getAvailableSlots } from "@/lib/actions/public";
@@ -54,17 +54,19 @@ export type PackageListItem = {
 export async function listPackages(range?: { start: Date; end: Date }): Promise<PackageListItem[]> {
   const { businessId } = await requireSession();
 
-  const packages = await prisma.sessionPackage.findMany({
-    where: { businessId, ...(range ? { createdAt: { gte: range.start, lt: range.end } } : {}) },
-    include: {
-      client: { select: { id: true, firstName: true, lastName: true, phone: true } },
-      specialist: { select: { id: true, displayName: true } },
-      service: { select: { id: true, name: true, basePriceCents: true, priceCurrencyCode: true } },
-      appointments: { select: { status: true } },
-      transactions: { select: TRANSACTION_SELECT, orderBy: { paidAt: "asc" } },
-    },
-    orderBy: { createdAt: "desc" },
-  });
+  const packages = await withTenant(businessId, (tx) =>
+    tx.sessionPackage.findMany({
+      where: { businessId, ...(range ? { createdAt: { gte: range.start, lt: range.end } } : {}) },
+      include: {
+        client: { select: { id: true, firstName: true, lastName: true, phone: true } },
+        specialist: { select: { id: true, displayName: true } },
+        service: { select: { id: true, name: true, basePriceCents: true, priceCurrencyCode: true } },
+        appointments: { select: { status: true } },
+        transactions: { select: TRANSACTION_SELECT, orderBy: { paidAt: "asc" } },
+      },
+      orderBy: { createdAt: "desc" },
+    })
+  );
 
   return packages.map((p) => ({
     id: p.id,
@@ -135,10 +137,12 @@ function toPackageDetail(pkg: PackageWithDetailInclude): PackageDetail {
 
 export async function getPackage(packageId: string): Promise<PackageDetail | null> {
   const { businessId } = await requireSession();
-  const pkg = await prisma.sessionPackage.findFirst({
-    where: { id: packageId, businessId },
-    include: PACKAGE_DETAIL_INCLUDE,
-  });
+  const pkg = await withTenant(businessId, (tx) =>
+    tx.sessionPackage.findFirst({
+      where: { id: packageId, businessId },
+      include: PACKAGE_DETAIL_INCLUDE,
+    })
+  );
   return pkg ? toPackageDetail(pkg) : null;
 }
 
@@ -147,11 +151,13 @@ export async function getPackage(packageId: string): Promise<PackageDetail | nul
 // session without leaving that client's page.
 export async function listPackagesByClient(clientId: string): Promise<PackageDetail[]> {
   const { businessId } = await requireSession();
-  const packages = await prisma.sessionPackage.findMany({
-    where: { businessId, clientId },
-    include: PACKAGE_DETAIL_INCLUDE,
-    orderBy: { createdAt: "desc" },
-  });
+  const packages = await withTenant(businessId, (tx) =>
+    tx.sessionPackage.findMany({
+      where: { businessId, clientId },
+      include: PACKAGE_DETAIL_INCLUDE,
+      orderBy: { createdAt: "desc" },
+    })
+  );
   return packages.map(toPackageDetail);
 }
 
@@ -194,10 +200,12 @@ export async function createPackage(input: CreatePackageInput): Promise<ActionRe
     return { success: false, error: "Indica el precio total del paquete" };
   }
 
-  const [specialist, service] = await Promise.all([
-    prisma.specialist.findFirst({ where: { id: input.specialistId, businessId, active: true } }),
-    prisma.service.findFirst({ where: { id: input.serviceId, businessId, active: true } }),
-  ]);
+  const [specialist, service] = await withTenant(businessId, (tx) =>
+    Promise.all([
+      tx.specialist.findFirst({ where: { id: input.specialistId, businessId, active: true } }),
+      tx.service.findFirst({ where: { id: input.serviceId, businessId, active: true } }),
+    ])
+  );
   if (!specialist) return { success: false, error: "Especialista no válido" };
   if (!service) return { success: false, error: "Servicio no válido" };
 
@@ -215,7 +223,9 @@ export async function createPackage(input: CreatePackageInput): Promise<ActionRe
   // picker and the public booking link use (getAvailableSlots) — reused here
   // instead of a separate ad-hoc conflict query so a package can never book a
   // session outside business hours, inside a break, or over an existing
-  // appointment, the way a single "Nueva cita" already can't.
+  // appointment, the way a single "Nueva cita" already can't. getAvailableSlots
+  // manages its own tenant transaction internally, so this loop stays outside
+  // the withTenant block below rather than nesting inside it.
   for (const session of sessions) {
     const sessionDateKey = dateKeyOf(session.startsAt);
     const slots = await getAvailableSlots(businessId, specialist.id, service.id, sessionDateKey);
@@ -227,39 +237,39 @@ export async function createPackage(input: CreatePackageInput): Promise<ActionRe
     }
   }
 
-  let clientId = input.clientId;
-  if (!clientId && input.newClient) {
-    const trimmedPhone = input.newClient.phone.trim();
-    if (!input.newClient.firstName.trim() || !input.newClient.lastName.trim() || !trimmedPhone) {
-      return { success: false, error: "Nombre, apellido y teléfono del cliente son obligatorios" };
-    }
-    const existing = await prisma.client.findUnique({
-      where: { businessId_phone: { businessId, phone: trimmedPhone } },
-    });
-    if (existing) {
-      clientId = existing.id;
-    } else {
-      const created = await prisma.client.create({
-        data: {
-          businessId,
-          firstName: input.newClient.firstName.trim(),
-          lastName: input.newClient.lastName.trim(),
-          phone: trimmedPhone,
-          email: input.newClient.email?.trim() || null,
-        },
-      });
-      clientId = created.id;
-    }
-  }
-  if (!clientId) return { success: false, error: "Elige un cliente o registra uno nuevo" };
-
   const packagePriceCents = input.paymentMode === "PACKAGE" ? Math.round(input.packagePrice! * 100) : null;
   const packagePriceCurrencyCode =
     input.paymentMode === "PACKAGE" ? input.packagePriceCurrencyCode || service.priceCurrencyCode : null;
   const notes = input.notes?.trim() || null;
-  const resolvedClientId = clientId;
 
-  await prisma.$transaction(async (tx) => {
+  const result = await withTenant(businessId, async (tx) => {
+    let clientId = input.clientId;
+    if (!clientId && input.newClient) {
+      const trimmedPhone = input.newClient.phone.trim();
+      if (!input.newClient.firstName.trim() || !input.newClient.lastName.trim() || !trimmedPhone) {
+        return { error: "Nombre, apellido y teléfono del cliente son obligatorios" };
+      }
+      const existing = await tx.client.findUnique({
+        where: { businessId_phone: { businessId, phone: trimmedPhone } },
+      });
+      if (existing) {
+        clientId = existing.id;
+      } else {
+        const created = await tx.client.create({
+          data: {
+            businessId,
+            firstName: input.newClient.firstName.trim(),
+            lastName: input.newClient.lastName.trim(),
+            phone: trimmedPhone,
+            email: input.newClient.email?.trim() || null,
+          },
+        });
+        clientId = created.id;
+      }
+    }
+    if (!clientId) return { error: "Elige un cliente o registra uno nuevo" };
+    const resolvedClientId = clientId;
+
     const pkg = await tx.sessionPackage.create({
       data: {
         businessId,
@@ -286,7 +296,9 @@ export async function createPackage(input: CreatePackageInput): Promise<ActionRe
         cancelToken: crypto.randomUUID(),
       })),
     });
+    return { error: null };
   });
+  if (result.error) return { success: false, error: result.error };
 
   revalidatePath("/agenda");
   revalidatePath("/packages");
@@ -301,27 +313,32 @@ export async function createPackage(input: CreatePackageInput): Promise<ActionRe
 export async function deletePackage(packageId: string): Promise<ActionResult> {
   const { businessId } = await requireSession();
 
-  const pkg = await prisma.sessionPackage.findFirst({
-    where: { id: packageId, businessId },
-    select: {
-      transactions: { select: { id: true } },
-      appointments: { select: { status: true, transactions: { select: { id: true } } } },
-    },
-  });
-  if (!pkg) return { success: false, error: "Paquete no encontrado" };
+  const result = await withTenant(businessId, async (tx) => {
+    const pkg = await tx.sessionPackage.findFirst({
+      where: { id: packageId, businessId },
+      select: {
+        transactions: { select: { id: true } },
+        appointments: { select: { status: true, transactions: { select: { id: true } } } },
+      },
+    });
+    if (!pkg) return "not_found" as const;
 
-  const hasPayment = pkg.transactions.length > 0 || pkg.appointments.some((a) => a.transactions.length > 0);
-  if (hasPayment) {
+    const hasPayment = pkg.transactions.length > 0 || pkg.appointments.some((a) => a.transactions.length > 0);
+    if (hasPayment) return "has_payment" as const;
+    if (pkg.appointments.some((a) => a.status === "ATTENDED")) return "has_attended" as const;
+
+    await tx.appointment.deleteMany({ where: { packageId } });
+    await tx.sessionPackage.delete({ where: { id: packageId } });
+    return "ok" as const;
+  });
+
+  if (result === "not_found") return { success: false, error: "Paquete no encontrado" };
+  if (result === "has_payment") {
     return { success: false, error: "No se puede eliminar: este paquete tiene pagos registrados" };
   }
-  if (pkg.appointments.some((a) => a.status === "ATTENDED")) {
+  if (result === "has_attended") {
     return { success: false, error: "No se puede eliminar: este paquete tiene sesiones ya asistidas" };
   }
-
-  await prisma.$transaction([
-    prisma.appointment.deleteMany({ where: { packageId } }),
-    prisma.sessionPackage.delete({ where: { id: packageId } }),
-  ]);
 
   revalidatePath("/packages");
   revalidatePath("/agenda");

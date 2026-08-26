@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { prisma } from "@/lib/prisma";
+import { withTenant } from "@/lib/tenant-db";
 import { requireOwner, requireSession } from "@/lib/session";
 import { SpecialistHoursSchema, SpecialistSchema } from "@/lib/validations";
 import type { ActionResult } from "@/lib/types";
@@ -35,11 +35,13 @@ function toListItem(s: {
 
 export async function listSpecialists(): Promise<SpecialistListItem[]> {
   const { businessId } = await requireOwner();
-  const specialists = await prisma.specialist.findMany({
-    where: { businessId },
-    include: { services: { select: { serviceId: true } } },
-    orderBy: [{ active: "desc" }, { displayName: "asc" }],
-  });
+  const specialists = await withTenant(businessId, (tx) =>
+    tx.specialist.findMany({
+      where: { businessId },
+      include: { services: { select: { serviceId: true } } },
+      orderBy: [{ active: "desc" }, { displayName: "asc" }],
+    })
+  );
   return specialists.map(toListItem);
 }
 
@@ -48,20 +50,24 @@ export async function listSpecialists(): Promise<SpecialistListItem[]> {
 // filter the service picker per specialist.
 export async function listActiveSpecialists(): Promise<SpecialistListItem[]> {
   const { businessId } = await requireSession();
-  const specialists = await prisma.specialist.findMany({
-    where: { businessId, active: true },
-    include: { services: { select: { serviceId: true } } },
-    orderBy: { displayName: "asc" },
-  });
+  const specialists = await withTenant(businessId, (tx) =>
+    tx.specialist.findMany({
+      where: { businessId, active: true },
+      include: { services: { select: { serviceId: true } } },
+      orderBy: { displayName: "asc" },
+    })
+  );
   return specialists.map(toListItem);
 }
 
 export async function getSpecialist(specialistId: string): Promise<SpecialistListItem | null> {
   const { businessId } = await requireOwner();
-  const specialist = await prisma.specialist.findFirst({
-    where: { id: specialistId, businessId },
-    include: { services: { select: { serviceId: true } } },
-  });
+  const specialist = await withTenant(businessId, (tx) =>
+    tx.specialist.findFirst({
+      where: { id: specialistId, businessId },
+      include: { services: { select: { serviceId: true } } },
+    })
+  );
   return specialist ? toListItem(specialist) : null;
 }
 
@@ -83,14 +89,16 @@ export async function createSpecialist(formData: FormData): Promise<CreateSpecia
     return { success: false, error: parsed.error.issues[0]?.message ?? "Datos inválidos" };
   }
 
-  const created = await prisma.specialist.create({
-    data: {
-      businessId,
-      displayName: parsed.data.displayName,
-      bio: parsed.data.bio || null,
-      services: { create: parsed.data.serviceIds.map((serviceId) => ({ serviceId })) },
-    },
-  });
+  const created = await withTenant(businessId, (tx) =>
+    tx.specialist.create({
+      data: {
+        businessId,
+        displayName: parsed.data.displayName,
+        bio: parsed.data.bio || null,
+        services: { create: parsed.data.serviceIds.map((serviceId) => ({ serviceId })) },
+      },
+    })
+  );
 
   revalidatePath("/specialists");
   return { success: true, specialistId: created.id };
@@ -104,19 +112,21 @@ export async function updateSpecialist(specialistId: string, formData: FormData)
     return { success: false, error: parsed.error.issues[0]?.message ?? "Datos inválidos" };
   }
 
-  const existing = await prisma.specialist.findFirst({ where: { id: specialistId, businessId } });
-  if (!existing) return { success: false, error: "Especialista no encontrado" };
+  const found = await withTenant(businessId, async (tx) => {
+    const existing = await tx.specialist.findFirst({ where: { id: specialistId, businessId } });
+    if (!existing) return false;
 
-  await prisma.$transaction([
-    prisma.specialist.update({
+    await tx.specialist.update({
       where: { id: specialistId },
       data: { displayName: parsed.data.displayName, bio: parsed.data.bio || null },
-    }),
-    prisma.specialistService.deleteMany({ where: { specialistId } }),
-    prisma.specialistService.createMany({
+    });
+    await tx.specialistService.deleteMany({ where: { specialistId } });
+    await tx.specialistService.createMany({
       data: parsed.data.serviceIds.map((serviceId) => ({ specialistId, serviceId })),
-    }),
-  ]);
+    });
+    return true;
+  });
+  if (!found) return { success: false, error: "Especialista no encontrado" };
 
   revalidatePath("/specialists");
   return { success: true };
@@ -128,21 +138,27 @@ export async function updateSpecialist(specialistId: string, formData: FormData)
 export async function deleteSpecialist(specialistId: string): Promise<ActionResult> {
   const { businessId } = await requireOwner();
 
-  const specialist = await prisma.specialist.findFirst({ where: { id: specialistId, businessId } });
-  if (!specialist) return { success: false, error: "Especialista no encontrado" };
+  const result = await withTenant(businessId, async (tx) => {
+    const specialist = await tx.specialist.findFirst({ where: { id: specialistId, businessId } });
+    if (!specialist) return "not_found" as const;
 
-  const [appointmentCount, packageCount] = await Promise.all([
-    prisma.appointment.count({ where: { specialistId } }),
-    prisma.sessionPackage.count({ where: { specialistId } }),
-  ]);
-  if (appointmentCount > 0 || packageCount > 0) {
+    const [appointmentCount, packageCount] = await Promise.all([
+      tx.appointment.count({ where: { specialistId } }),
+      tx.sessionPackage.count({ where: { specialistId } }),
+    ]);
+    if (appointmentCount > 0 || packageCount > 0) return "in_use" as const;
+
+    await tx.specialist.delete({ where: { id: specialistId } });
+    return "ok" as const;
+  });
+
+  if (result === "not_found") return { success: false, error: "Especialista no encontrado" };
+  if (result === "in_use") {
     return {
       success: false,
       error: "No se puede eliminar: este especialista tiene citas o paquetes registrados. Desactívalo en su lugar.",
     };
   }
-
-  await prisma.specialist.delete({ where: { id: specialistId } });
 
   revalidatePath("/specialists");
   return { success: true };
@@ -151,10 +167,12 @@ export async function deleteSpecialist(specialistId: string): Promise<ActionResu
 export async function toggleSpecialistActive(specialistId: string, active: boolean): Promise<ActionResult> {
   const { businessId } = await requireOwner();
 
-  const { count } = await prisma.specialist.updateMany({
-    where: { id: specialistId, businessId },
-    data: { active },
-  });
+  const { count } = await withTenant(businessId, (tx) =>
+    tx.specialist.updateMany({
+      where: { id: specialistId, businessId },
+      data: { active },
+    })
+  );
   if (count === 0) return { success: false, error: "Especialista no encontrado" };
 
   revalidatePath("/specialists");
@@ -176,13 +194,15 @@ export async function getSpecialistHours(
   specialistId: string,
 ): Promise<{ hasCustomHours: boolean; hours: SpecialistHourItem[] } | null> {
   const { businessId } = await requireOwner();
-  const [specialist, businessHours] = await Promise.all([
-    prisma.specialist.findFirst({
-      where: { id: specialistId, businessId },
-      select: { hasCustomHours: true, hours: true },
-    }),
-    prisma.businessHour.findMany({ where: { businessId } }),
-  ]);
+  const [specialist, businessHours] = await withTenant(businessId, (tx) =>
+    Promise.all([
+      tx.specialist.findFirst({
+        where: { id: specialistId, businessId },
+        select: { hasCustomHours: true, hours: true },
+      }),
+      tx.businessHour.findMany({ where: { businessId } }),
+    ])
+  );
   if (!specialist) return null;
 
   const byWeekday = new Map(specialist.hours.map((h) => [h.weekday, h]));
@@ -231,13 +251,13 @@ export async function updateSpecialistHours(
     return { success: false, error: parsed.error.issues[0]?.message ?? "Horario inválido" };
   }
 
-  const specialist = await prisma.specialist.findFirst({ where: { id: specialistId, businessId } });
-  if (!specialist) return { success: false, error: "Especialista no encontrado" };
+  const found = await withTenant(businessId, async (tx) => {
+    const specialist = await tx.specialist.findFirst({ where: { id: specialistId, businessId } });
+    if (!specialist) return false;
 
-  await prisma.$transaction([
-    prisma.specialist.update({ where: { id: specialistId }, data: { hasCustomHours: parsed.data.hasCustomHours } }),
-    ...parsed.data.hours.map((h) =>
-      prisma.specialistHour.upsert({
+    await tx.specialist.update({ where: { id: specialistId }, data: { hasCustomHours: parsed.data.hasCustomHours } });
+    for (const h of parsed.data.hours) {
+      await tx.specialistHour.upsert({
         where: { specialistId_weekday: { specialistId, weekday: h.weekday } },
         create: {
           specialistId,
@@ -255,9 +275,11 @@ export async function updateSpecialistHours(
           breakStart: h.isClosed ? null : h.breakStart || null,
           breakEnd: h.isClosed ? null : h.breakEnd || null,
         },
-      }),
-    ),
-  ]);
+      });
+    }
+    return true;
+  });
+  if (!found) return { success: false, error: "Especialista no encontrado" };
 
   revalidatePath("/specialists");
   return { success: true };

@@ -1,6 +1,6 @@
 "use server";
 
-import { prisma } from "@/lib/prisma";
+import { withTenant } from "@/lib/tenant-db";
 import { requireOwner } from "@/lib/session";
 import { toDateKey } from "@/lib/format";
 
@@ -63,6 +63,7 @@ export async function getReportsSummary(period: ReportPeriod = "month"): Promise
   const periodStartsAtFilter = periodEnd ? { gte: periodStart, lt: periodEnd } : { gte: periodStart };
   const chartStart = new Date(todayStart.getTime() - (DAILY_CHART_DAYS - 1) * 24 * 60 * 60_000);
 
+  return withTenant(businessId, async (tx) => {
   const [
     business,
     periodTransactions,
@@ -72,14 +73,14 @@ export async function getReportsSummary(period: ReportPeriod = "month"): Promise
     newClientRecords,
     chartTransactions,
   ] = await Promise.all([
-    prisma.business.findUniqueOrThrow({ where: { id: businessId }, select: { localCurrencyCode: true } }),
-    prisma.transaction.findMany({
+    tx.business.findUniqueOrThrow({ where: { id: businessId }, select: { localCurrencyCode: true } }),
+    tx.transaction.findMany({
       where: { ...transactionBusinessFilter(businessId), paidAt: periodPaidAtFilter },
       select: { paidCurrencyCode: true, amountLocalCents: true, amountForeignCents: true, currencyForeign: true },
     }),
-    prisma.appointment.count({ where: { businessId, startsAt: { gte: todayStart, lt: todayEnd } } }),
-    prisma.appointment.count({ where: { businessId, startsAt: periodStartsAtFilter } }),
-    prisma.appointment.groupBy({
+    tx.appointment.count({ where: { businessId, startsAt: { gte: todayStart, lt: todayEnd } } }),
+    tx.appointment.count({ where: { businessId, startsAt: periodStartsAtFilter } }),
+    tx.appointment.groupBy({
       by: ["serviceId"],
       where: { businessId, startsAt: periodStartsAtFilter },
       _count: { serviceId: true },
@@ -89,11 +90,11 @@ export async function getReportsSummary(period: ReportPeriod = "month"): Promise
     // Not filtered by active — a client who was later deleted still
     // shows up here, same as they still show up on their old
     // appointments, so deleting a client never changes report numbers.
-    prisma.client.findMany({
+    tx.client.findMany({
       where: { businessId, createdAt: periodStartsAtFilter },
       select: { id: true, firstName: true, lastName: true, phone: true },
     }),
-    prisma.transaction.findMany({
+    tx.transaction.findMany({
       where: { ...transactionBusinessFilter(businessId), paidAt: { gte: chartStart } },
       select: { amountLocalCents: true, paidAt: true },
     }),
@@ -117,7 +118,7 @@ export async function getReportsSummary(period: ReportPeriod = "month"): Promise
   let newClients: ReportsSummary["newClients"] = [];
   if (newClientRecords.length > 0) {
     const newClientIds = newClientRecords.map((c) => c.id);
-    const appointmentCounts = await prisma.appointment.groupBy({
+    const appointmentCounts = await tx.appointment.groupBy({
       by: ["clientId"],
       where: { businessId, clientId: { in: newClientIds } },
       _count: { clientId: true },
@@ -129,7 +130,7 @@ export async function getReportsSummary(period: ReportPeriod = "month"): Promise
       .slice(0, 10);
   }
 
-  const services = await prisma.service.findMany({
+  const services = await tx.service.findMany({
     where: { id: { in: topServiceGroups.map((g) => g.serviceId) } },
     select: { id: true, name: true },
   });
@@ -143,7 +144,7 @@ export async function getReportsSummary(period: ReportPeriod = "month"): Promise
   // appointment (ever, for this business) predates the period. New = a
   // client with an appointment in the period whose record itself was
   // created within the period (mirrors newClientsCount's own definition).
-  const periodAppointments = await prisma.appointment.findMany({
+  const periodAppointments = await tx.appointment.findMany({
     where: { businessId, startsAt: periodStartsAtFilter },
     select: { clientId: true, serviceId: true },
   });
@@ -155,12 +156,12 @@ export async function getReportsSummary(period: ReportPeriod = "month"): Promise
 
   if (periodClientIds.length > 0) {
     const [firstAppointments, periodClientRecords] = await Promise.all([
-      prisma.appointment.groupBy({
+      tx.appointment.groupBy({
         by: ["clientId"],
         where: { businessId, clientId: { in: periodClientIds } },
         _min: { startsAt: true },
       }),
-      prisma.client.findMany({ where: { id: { in: periodClientIds } }, select: { id: true, createdAt: true } }),
+      tx.client.findMany({ where: { id: { in: periodClientIds } }, select: { id: true, createdAt: true } }),
     ]);
 
     const recurringClientIdSet = new Set(
@@ -171,11 +172,11 @@ export async function getReportsSummary(period: ReportPeriod = "month"): Promise
 
     if (recurringClientIdSet.size > 0) {
       const [clients, appointmentCounts] = await Promise.all([
-        prisma.client.findMany({
+        tx.client.findMany({
           where: { id: { in: [...recurringClientIdSet] } },
           select: { id: true, firstName: true, lastName: true, phone: true },
         }),
-        prisma.appointment.groupBy({
+        tx.appointment.groupBy({
           by: ["clientId"],
           where: { businessId, clientId: { in: [...recurringClientIdSet] } },
           _count: { clientId: true },
@@ -202,7 +203,7 @@ export async function getReportsSummary(period: ReportPeriod = "month"): Promise
       if (recurringClientIdSet.has(a.clientId)) entry.recurringClients.add(a.clientId);
     }
     const byServiceIds = [...byService.keys()];
-    const byServiceInfo = await prisma.service.findMany({
+    const byServiceInfo = await tx.service.findMany({
       where: { id: { in: byServiceIds } },
       select: { id: true, name: true },
     });
@@ -247,4 +248,5 @@ export async function getReportsSummary(period: ReportPeriod = "month"): Promise
     clientsByService,
     dailyRevenue,
   };
+  });
 }

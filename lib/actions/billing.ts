@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { prisma } from "@/lib/prisma";
+import { withTenant } from "@/lib/tenant-db";
 import { getSession } from "@/lib/session";
 import { isBusinessBlocked, PLATFORM_SETTINGS_ID } from "@/lib/billing";
 import { PaymentReportSchema } from "@/lib/validations";
@@ -35,18 +35,20 @@ export type BillingInfo = {
 export async function getBillingInfo(): Promise<BillingInfo> {
   const { businessId, businessName } = await requireBusinessUser();
 
-  const [business, settings] = await Promise.all([
-    prisma.business.findUnique({
-      where: { id: businessId },
-      select: {
-        isExempt: true,
-        monthlyFeeUsdCents: true,
-        nextPaymentDueDate: true,
-        localCurrencyCode: true,
-      },
-    }),
-    prisma.platformSettings.findUnique({ where: { id: PLATFORM_SETTINGS_ID } }),
-  ]);
+  const [business, settings] = await withTenant(businessId, (tx) =>
+    Promise.all([
+      tx.business.findUnique({
+        where: { id: businessId },
+        select: {
+          isExempt: true,
+          monthlyFeeUsdCents: true,
+          nextPaymentDueDate: true,
+          localCurrencyCode: true,
+        },
+      }),
+      tx.platformSettings.findUnique({ where: { id: PLATFORM_SETTINGS_ID } }),
+    ])
+  );
 
   const isExempt = business?.isExempt ?? false;
   const nextPaymentDueDate = business?.nextPaymentDueDate ?? null;
@@ -66,11 +68,13 @@ export async function getBillingInfo(): Promise<BillingInfo> {
 
 export async function listMyPaymentReports() {
   const { businessId } = await requireBusinessUser();
-  return prisma.paymentReport.findMany({
-    where: { businessId },
-    orderBy: { createdAt: "desc" },
-    include: { lines: true },
-  });
+  return withTenant(businessId, (tx) =>
+    tx.paymentReport.findMany({
+      where: { businessId },
+      orderBy: { createdAt: "desc" },
+      include: { lines: true },
+    })
+  );
 }
 
 // A business owner's self-reported claim of having paid the maintenance fee
@@ -86,20 +90,22 @@ export async function submitPaymentReport(input: unknown): Promise<ActionResult>
     return { success: false, error: parsed.error.issues[0]?.message ?? "Datos inválidos" };
   }
 
-  await prisma.paymentReport.create({
-    data: {
-      businessId,
-      reportedById: userId,
-      note: parsed.data.note,
-      lines: {
-        create: parsed.data.lines.map((line) => ({
-          paymentMethod: line.paymentMethod,
-          amountUsdCents: line.amount,
-          reference: line.reference,
-        })),
+  await withTenant(businessId, (tx) =>
+    tx.paymentReport.create({
+      data: {
+        businessId,
+        reportedById: userId,
+        note: parsed.data.note,
+        lines: {
+          create: parsed.data.lines.map((line) => ({
+            paymentMethod: line.paymentMethod,
+            amountUsdCents: line.amount,
+            reference: line.reference,
+          })),
+        },
       },
-    },
-  });
+    })
+  );
 
   revalidatePath("/billing");
   return { success: true };

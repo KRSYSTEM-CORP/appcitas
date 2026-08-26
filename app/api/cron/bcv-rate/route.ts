@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { withSuperAdmin } from "@/lib/tenant-db";
 import { fetchBcvRate } from "@/lib/bcv-rate";
 
 // Runs once a day at 00:00 Venezuela time (04:00 UTC — Vercel cron schedules
@@ -18,32 +18,33 @@ export async function GET(request: NextRequest) {
 
   const [usdRate, eurRate] = await Promise.allSettled([fetchBcvRate("USD"), fetchBcvRate("EUR")]);
 
-  const businesses = await prisma.business.findMany({
-    where: { localCurrencyCode: "VES", fxEnabled: true, foreignCurrencyCode: { in: ["USD", "EUR"] } },
-    select: { id: true, foreignCurrencyCode: true },
-  });
-
-  let updated = 0;
-  let skipped = 0;
-  for (const business of businesses) {
-    const rateResult = business.foreignCurrencyCode === "USD" ? usdRate : eurRate;
-    if (rateResult.status !== "fulfilled") {
-      skipped++;
-      continue;
-    }
-    await prisma.business.update({
-      where: { id: business.id },
-      data: { exchangeRate: rateResult.value, exchangeRateUpdatedAt: new Date() },
+  const results = await withSuperAdmin(async (tx) => {
+    const businesses = await tx.business.findMany({
+      where: { localCurrencyCode: "VES", fxEnabled: true, foreignCurrencyCode: { in: ["USD", "EUR"] } },
+      select: { id: true, foreignCurrencyCode: true },
     });
-    updated++;
-  }
+
+    let updated = 0;
+    let skipped = 0;
+    for (const business of businesses) {
+      const rateResult = business.foreignCurrencyCode === "USD" ? usdRate : eurRate;
+      if (rateResult.status !== "fulfilled") {
+        skipped++;
+        continue;
+      }
+      await tx.business.update({
+        where: { id: business.id },
+        data: { exchangeRate: rateResult.value, exchangeRateUpdatedAt: new Date() },
+      });
+      updated++;
+    }
+    return { total: businesses.length, updated, skipped };
+  });
 
   return NextResponse.json({
     ok: true,
     usdRate: usdRate.status === "fulfilled" ? usdRate.value : null,
     eurRate: eurRate.status === "fulfilled" ? eurRate.value : null,
-    total: businesses.length,
-    updated,
-    skipped,
+    ...results,
   });
 }

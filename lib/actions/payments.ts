@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import type { z } from "zod";
-import { prisma } from "@/lib/prisma";
+import { withTenant } from "@/lib/tenant-db";
 import { requireSession } from "@/lib/session";
 import { PaymentSchema, USD_ALWAYS_METHODS } from "@/lib/validations";
 import type { ActionResult } from "@/lib/types";
@@ -41,48 +41,49 @@ export async function recordPayments(
     parsedLines.push(parsed.data);
   }
 
-  const targetExists =
-    "appointmentId" in target
-      ? await prisma.appointment.findFirst({ where: { id: target.appointmentId, businessId } })
-      : await prisma.sessionPackage.findFirst({ where: { id: target.packageId, businessId } });
-  if (!targetExists) {
-    return { success: false, error: "appointmentId" in target ? "Cita no encontrada" : "Paquete no encontrado" };
-  }
+  const result = await withTenant(businessId, async (tx) => {
+    const targetExists =
+      "appointmentId" in target
+        ? await tx.appointment.findFirst({ where: { id: target.appointmentId, businessId } })
+        : await tx.sessionPackage.findFirst({ where: { id: target.packageId, businessId } });
+    if (!targetExists) {
+      return { error: "appointmentId" in target ? "Cita no encontrada" : "Paquete no encontrado" };
+    }
 
-  const business = await prisma.business.findUniqueOrThrow({ where: { id: businessId } });
+    const business = await tx.business.findUniqueOrThrow({ where: { id: businessId } });
 
-  const rate = business.exchangeRate != null ? Number(business.exchangeRate) : null;
-  const useFx = business.fxEnabled && rate != null && rate > 0;
+    const rate = business.exchangeRate != null ? Number(business.exchangeRate) : null;
+    const useFx = business.fxEnabled && rate != null && rate > 0;
 
-  if (parsedLines.some((l) => l.currency === "FOREIGN") && !useFx) {
-    return {
-      success: false,
-      error: "Configura la moneda de referencia y una tasa de cambio en Configuración antes de cobrar en divisas",
-    };
-  }
+    if (parsedLines.some((l) => l.currency === "FOREIGN") && !useFx) {
+      return { error: "Configura la moneda de referencia y una tasa de cambio en Configuración antes de cobrar en divisas" };
+    }
 
-  const data: Prisma.TransactionCreateManyInput[] = parsedLines.map((line) => {
-    const enteredCents = Math.round(line.amount * 100);
-    // rate is local-per-foreign-unit (e.g. 1 USD = 40 VES), and cents cancel
-    // consistently on both sides of the conversion.
-    const amountLocalCents = line.currency === "LOCAL" ? enteredCents : Math.round(enteredCents * rate!);
-    const amountForeignCents =
-      line.currency === "FOREIGN" ? enteredCents : useFx ? Math.round(enteredCents / rate!) : null;
+    const data: Prisma.TransactionCreateManyInput[] = parsedLines.map((line) => {
+      const enteredCents = Math.round(line.amount * 100);
+      // rate is local-per-foreign-unit (e.g. 1 USD = 40 VES), and cents cancel
+      // consistently on both sides of the conversion.
+      const amountLocalCents = line.currency === "LOCAL" ? enteredCents : Math.round(enteredCents * rate!);
+      const amountForeignCents =
+        line.currency === "FOREIGN" ? enteredCents : useFx ? Math.round(enteredCents / rate!) : null;
 
-    return {
-      ...("appointmentId" in target ? { appointmentId: target.appointmentId } : { packageId: target.packageId }),
-      amountLocalCents,
-      amountForeignCents,
-      paidCurrencyCode: line.currency === "LOCAL" ? business.localCurrencyCode : business.foreignCurrencyCode,
-      currencyLocal: business.localCurrencyCode,
-      currencyForeign: useFx ? business.foreignCurrencyCode : null,
-      fxRate: useFx ? rate : null,
-      paymentMethod: line.paymentMethod,
-      reference: line.reference || null,
-    };
+      return {
+        ...("appointmentId" in target ? { appointmentId: target.appointmentId } : { packageId: target.packageId }),
+        amountLocalCents,
+        amountForeignCents,
+        paidCurrencyCode: line.currency === "LOCAL" ? business.localCurrencyCode : business.foreignCurrencyCode,
+        currencyLocal: business.localCurrencyCode,
+        currencyForeign: useFx ? business.foreignCurrencyCode : null,
+        fxRate: useFx ? rate : null,
+        paymentMethod: line.paymentMethod,
+        reference: line.reference || null,
+      };
+    });
+
+    await tx.transaction.createMany({ data });
+    return { error: null };
   });
-
-  await prisma.transaction.createMany({ data });
+  if (result.error) return { success: false, error: result.error };
 
   revalidatePath("/agenda");
   revalidatePath("/packages");

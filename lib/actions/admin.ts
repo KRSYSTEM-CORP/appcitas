@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { prisma } from "@/lib/prisma";
+import { withSuperAdmin } from "@/lib/tenant-db";
 import { requireSuperAdmin } from "@/lib/session";
 import { sendAnnouncementEmail } from "@/lib/email";
 import {
@@ -38,10 +38,12 @@ export type AdminBusinessRow = {
 export async function listBusinessesForAdmin(): Promise<AdminBusinessRow[]> {
   await requireSuperAdmin();
 
-  const businesses = await prisma.business.findMany({
-    orderBy: { createdAt: "desc" },
-    include: { users: { where: { role: "OWNER" }, take: 1 } },
-  });
+  const businesses = await withSuperAdmin((tx) =>
+    tx.business.findMany({
+      orderBy: { createdAt: "desc" },
+      include: { users: { where: { role: "OWNER" }, take: 1 } },
+    })
+  );
 
   return businesses
     .filter((b) => b.users[0] && !b.users[0].isSuperAdmin)
@@ -63,10 +65,12 @@ export async function listBusinessesForAdmin(): Promise<AdminBusinessRow[]> {
 // which have no email at all — see User.email being optional in schema.prisma).
 export async function listAnnouncementRecipients(): Promise<{ email: string; businessName: string }[]> {
   await requireSuperAdmin();
-  const owners = await prisma.user.findMany({
-    where: { role: "OWNER", status: "ACTIVE", email: { not: null } },
-    select: { email: true, business: { select: { name: true } } },
-  });
+  const owners = await withSuperAdmin((tx) =>
+    tx.user.findMany({
+      where: { role: "OWNER", status: "ACTIVE", email: { not: null } },
+      select: { email: true, business: { select: { name: true } } },
+    })
+  );
   return owners.map((o) => ({ email: o.email as string, businessName: o.business.name }));
 }
 
@@ -110,25 +114,27 @@ export async function sendAnnouncement(input: unknown): Promise<SendAnnouncement
 export async function approveBusiness(userId: string): Promise<ActionResult> {
   await requireSuperAdmin();
 
-  const user = await prisma.user.findUnique({ where: { id: userId } });
-  if (!user || user.status !== "PENDING") {
-    return { success: false, error: "No encontrado o ya fue procesado" };
-  }
+  const result = await withSuperAdmin(async (tx) => {
+    const user = await tx.user.findUnique({ where: { id: userId } });
+    if (!user || user.status !== "PENDING") {
+      return { error: "No encontrado o ya fue procesado" };
+    }
 
-  const settings = await prisma.platformSettings.findUnique({ where: { id: PLATFORM_SETTINGS_ID } });
-  const trialEnd = new Date();
-  trialEnd.setDate(trialEnd.getDate() + TRIAL_DAYS);
+    const settings = await tx.platformSettings.findUnique({ where: { id: PLATFORM_SETTINGS_ID } });
+    const trialEnd = new Date();
+    trialEnd.setDate(trialEnd.getDate() + TRIAL_DAYS);
 
-  await prisma.$transaction([
-    prisma.user.update({ where: { id: userId }, data: { status: "ACTIVE" } }),
-    prisma.business.update({
+    await tx.user.update({ where: { id: userId }, data: { status: "ACTIVE" } });
+    await tx.business.update({
       where: { id: user.businessId },
       data: {
         monthlyFeeUsdCents: settings?.defaultMonthlyFeeUsdCents ?? FALLBACK_MONTHLY_FEE_USD_CENTS,
         nextPaymentDueDate: trialEnd,
       },
-    }),
-  ]);
+    });
+    return { error: null };
+  });
+  if (result.error) return { success: false, error: result.error };
 
   revalidatePath("/admin");
   return { success: true };
@@ -136,10 +142,12 @@ export async function approveBusiness(userId: string): Promise<ActionResult> {
 
 export async function denyBusiness(userId: string): Promise<ActionResult> {
   await requireSuperAdmin();
-  const { count } = await prisma.user.updateMany({
-    where: { id: userId, status: "PENDING" },
-    data: { status: "SUSPENDED" },
-  });
+  const { count } = await withSuperAdmin((tx) =>
+    tx.user.updateMany({
+      where: { id: userId, status: "PENDING" },
+      data: { status: "SUSPENDED" },
+    })
+  );
   if (count === 0) return { success: false, error: "No encontrado o ya fue procesado" };
   revalidatePath("/admin");
   return { success: true };
@@ -150,14 +158,14 @@ export async function suspendBusiness(userId: string): Promise<ActionResult> {
   if (session.userId === userId) {
     return { success: false, error: "No puedes suspender tu propia cuenta" };
   }
-  await prisma.user.updateMany({ where: { id: userId }, data: { status: "SUSPENDED" } });
+  await withSuperAdmin((tx) => tx.user.updateMany({ where: { id: userId }, data: { status: "SUSPENDED" } }));
   revalidatePath("/admin");
   return { success: true };
 }
 
 export async function reactivateBusiness(userId: string): Promise<ActionResult> {
   await requireSuperAdmin();
-  await prisma.user.updateMany({ where: { id: userId }, data: { status: "ACTIVE" } });
+  await withSuperAdmin((tx) => tx.user.updateMany({ where: { id: userId }, data: { status: "ACTIVE" } }));
   revalidatePath("/admin");
   return { success: true };
 }
@@ -172,30 +180,32 @@ export async function reactivateBusiness(userId: string): Promise<ActionResult> 
 export async function deleteBusiness(businessId: string): Promise<ActionResult> {
   const session = await requireSuperAdmin();
 
-  const business = await prisma.business.findUnique({ where: { id: businessId } });
-  if (!business) return { success: false, error: "Negocio no encontrado" };
+  const result = await withSuperAdmin(async (tx) => {
+    const business = await tx.business.findUnique({ where: { id: businessId } });
+    if (!business) return { error: "Negocio no encontrado" };
 
-  const owner = await prisma.user.findFirst({ where: { businessId, role: "OWNER" } });
-  if (owner?.id === session.userId) {
-    return { success: false, error: "No puedes eliminar tu propio negocio" };
-  }
+    const owner = await tx.user.findFirst({ where: { businessId, role: "OWNER" } });
+    if (owner?.id === session.userId) {
+      return { error: "No puedes eliminar tu propio negocio" };
+    }
 
-  await prisma.$transaction([
-    prisma.transaction.deleteMany({
+    await tx.transaction.deleteMany({
       where: { OR: [{ appointment: { businessId } }, { sessionPackage: { businessId } }] },
-    }),
-    prisma.notification.deleteMany({ where: { appointment: { businessId } } }),
-    prisma.appointment.deleteMany({ where: { businessId } }),
-    prisma.sessionPackage.deleteMany({ where: { businessId } }),
-    prisma.specialistService.deleteMany({ where: { specialist: { businessId } } }),
-    prisma.serviceHour.deleteMany({ where: { service: { businessId } } }),
-    prisma.specialist.deleteMany({ where: { businessId } }),
-    prisma.service.deleteMany({ where: { businessId } }),
-    prisma.client.deleteMany({ where: { businessId } }),
-    prisma.businessHour.deleteMany({ where: { businessId } }),
-    prisma.user.deleteMany({ where: { businessId } }),
-    prisma.business.delete({ where: { id: businessId } }),
-  ]);
+    });
+    await tx.notification.deleteMany({ where: { appointment: { businessId } } });
+    await tx.appointment.deleteMany({ where: { businessId } });
+    await tx.sessionPackage.deleteMany({ where: { businessId } });
+    await tx.specialistService.deleteMany({ where: { specialist: { businessId } } });
+    await tx.serviceHour.deleteMany({ where: { service: { businessId } } });
+    await tx.specialist.deleteMany({ where: { businessId } });
+    await tx.service.deleteMany({ where: { businessId } });
+    await tx.client.deleteMany({ where: { businessId } });
+    await tx.businessHour.deleteMany({ where: { businessId } });
+    await tx.user.deleteMany({ where: { businessId } });
+    await tx.business.delete({ where: { id: businessId } });
+    return { error: null };
+  });
+  if (result.error) return { success: false, error: result.error };
 
   revalidatePath("/admin");
   return { success: true };
@@ -203,7 +213,7 @@ export async function deleteBusiness(businessId: string): Promise<ActionResult> 
 
 export async function setBusinessExempt(businessId: string, exempt: boolean): Promise<ActionResult> {
   await requireSuperAdmin();
-  await prisma.business.update({ where: { id: businessId }, data: { isExempt: exempt } });
+  await withSuperAdmin((tx) => tx.business.update({ where: { id: businessId }, data: { isExempt: exempt } }));
   revalidatePath("/admin");
   revalidatePath("/settings");
   return { success: true };
@@ -220,8 +230,8 @@ export async function recordMaintenancePayment(businessId: string, input: unknow
     return { success: false, error: parsed.error.issues[0]?.message ?? "Datos de pago inválidos" };
   }
 
-  await prisma.$transaction([
-    prisma.payment.create({
+  await withSuperAdmin(async (tx) => {
+    await tx.payment.create({
       data: {
         businessId,
         amountUsdCents: parsed.data.amount,
@@ -229,15 +239,15 @@ export async function recordMaintenancePayment(businessId: string, input: unknow
         note: parsed.data.note,
         verifiedById: session.userId,
       },
-    }),
-    prisma.business.update({
+    });
+    await tx.business.update({
       where: { id: businessId },
       data: {
         monthlyFeeUsdCents: parsed.data.amount,
         nextPaymentDueDate: parsed.data.periodEnd,
       },
-    }),
-  ]);
+    });
+  });
 
   revalidatePath("/admin");
   revalidatePath("/settings");
@@ -247,11 +257,13 @@ export async function recordMaintenancePayment(businessId: string, input: unknow
 
 export async function listPendingPaymentReports() {
   await requireSuperAdmin();
-  return prisma.paymentReport.findMany({
-    where: { status: "PENDING" },
-    orderBy: { createdAt: "asc" },
-    include: { business: { select: { name: true } }, lines: true },
-  });
+  return withSuperAdmin((tx) =>
+    tx.paymentReport.findMany({
+      where: { status: "PENDING" },
+      orderBy: { createdAt: "asc" },
+      include: { business: { select: { name: true } }, lines: true },
+    })
+  );
 }
 
 // Approving a self-reported payment sums up the payment-method lines the
@@ -267,30 +279,30 @@ export async function listPendingPaymentReports() {
 export async function approvePaymentReport(reportId: string): Promise<ActionResult> {
   const session = await requireSuperAdmin();
 
-  const report = await prisma.paymentReport.findUnique({
-    where: { id: reportId },
-    include: { lines: true },
-  });
-  if (!report || report.status !== "PENDING") {
-    return { success: false, error: "Reporte no encontrado o ya fue procesado" };
-  }
-  if (report.lines.length === 0) {
-    return { success: false, error: "El reporte no tiene métodos de pago" };
-  }
+  const result = await withSuperAdmin(async (tx) => {
+    const report = await tx.paymentReport.findUnique({
+      where: { id: reportId },
+      include: { lines: true },
+    });
+    if (!report || report.status !== "PENDING") {
+      return { error: "Reporte no encontrado o ya fue procesado" };
+    }
+    if (report.lines.length === 0) {
+      return { error: "El reporte no tiene métodos de pago" };
+    }
 
-  const business = await prisma.business.findUnique({ where: { id: report.businessId } });
-  if (!business) {
-    return { success: false, error: "Negocio no encontrado" };
-  }
+    const business = await tx.business.findUnique({ where: { id: report.businessId } });
+    if (!business) {
+      return { error: "Negocio no encontrado" };
+    }
 
-  const totalUsdCents = report.lines.reduce((sum, line) => sum + line.amountUsdCents, 0);
-  const months = business.monthlyFeeUsdCents
-    ? monthsCoveredWithBonus(totalUsdCents, business.monthlyFeeUsdCents)
-    : 1;
-  const periodEnd = extendDueDateByMonths(business.nextPaymentDueDate, months || 1);
+    const totalUsdCents = report.lines.reduce((sum, line) => sum + line.amountUsdCents, 0);
+    const months = business.monthlyFeeUsdCents
+      ? monthsCoveredWithBonus(totalUsdCents, business.monthlyFeeUsdCents)
+      : 1;
+    const periodEnd = extendDueDateByMonths(business.nextPaymentDueDate, months || 1);
 
-  await prisma.$transaction([
-    prisma.payment.create({
+    await tx.payment.create({
       data: {
         businessId: report.businessId,
         amountUsdCents: totalUsdCents,
@@ -298,13 +310,15 @@ export async function approvePaymentReport(reportId: string): Promise<ActionResu
         note: report.note ? `Reportado por el usuario: ${report.note}` : "Reportado por el usuario",
         verifiedById: session.userId,
       },
-    }),
-    prisma.business.update({ where: { id: report.businessId }, data: { nextPaymentDueDate: periodEnd } }),
-    prisma.paymentReport.update({
+    });
+    await tx.business.update({ where: { id: report.businessId }, data: { nextPaymentDueDate: periodEnd } });
+    await tx.paymentReport.update({
       where: { id: reportId },
       data: { status: "APPROVED", reviewedById: session.userId, reviewedAt: new Date() },
-    }),
-  ]);
+    });
+    return { error: null };
+  });
+  if (result.error) return { success: false, error: result.error };
 
   revalidatePath("/admin");
   revalidatePath("/billing");
@@ -319,15 +333,17 @@ export async function rejectPaymentReport(reportId: string, input: unknown): Pro
     return { success: false, error: parsed.error.issues[0]?.message ?? "Datos inválidos" };
   }
 
-  const result = await prisma.paymentReport.updateMany({
-    where: { id: reportId, status: "PENDING" },
-    data: {
-      status: "REJECTED",
-      reviewedById: session.userId,
-      reviewedAt: new Date(),
-      reviewNote: parsed.data.reviewNote,
-    },
-  });
+  const result = await withSuperAdmin((tx) =>
+    tx.paymentReport.updateMany({
+      where: { id: reportId, status: "PENDING" },
+      data: {
+        status: "REJECTED",
+        reviewedById: session.userId,
+        reviewedAt: new Date(),
+        reviewNote: parsed.data.reviewNote,
+      },
+    })
+  );
 
   if (result.count === 0) {
     return { success: false, error: "Reporte no encontrado o ya fue procesado" };
@@ -344,7 +360,7 @@ export async function getPlatformSettings(): Promise<{
   defaultMonthlyFeeUsdCents: number | null;
 }> {
   await requireSuperAdmin();
-  const settings = await prisma.platformSettings.findUnique({ where: { id: PLATFORM_SETTINGS_ID } });
+  const settings = await withSuperAdmin((tx) => tx.platformSettings.findUnique({ where: { id: PLATFORM_SETTINGS_ID } }));
   return {
     paymentInstructions: settings?.paymentInstructions ?? null,
     binanceQrDataUrl: settings?.binanceQrDataUrl ?? null,
@@ -360,22 +376,24 @@ export async function updatePlatformSettings(input: unknown): Promise<ActionResu
     return { success: false, error: parsed.error.issues[0]?.message ?? "Datos inválidos" };
   }
 
-  await prisma.platformSettings.upsert({
-    where: { id: PLATFORM_SETTINGS_ID },
-    create: {
-      id: PLATFORM_SETTINGS_ID,
-      paymentInstructions: parsed.data.paymentInstructions,
-      binanceQrDataUrl: parsed.data.binanceQrDataUrl,
-      binanceId: parsed.data.binanceId,
-      defaultMonthlyFeeUsdCents: parsed.data.defaultMonthlyFee,
-    },
-    update: {
-      paymentInstructions: parsed.data.paymentInstructions,
-      binanceQrDataUrl: parsed.data.binanceQrDataUrl,
-      binanceId: parsed.data.binanceId,
-      defaultMonthlyFeeUsdCents: parsed.data.defaultMonthlyFee,
-    },
-  });
+  await withSuperAdmin((tx) =>
+    tx.platformSettings.upsert({
+      where: { id: PLATFORM_SETTINGS_ID },
+      create: {
+        id: PLATFORM_SETTINGS_ID,
+        paymentInstructions: parsed.data.paymentInstructions,
+        binanceQrDataUrl: parsed.data.binanceQrDataUrl,
+        binanceId: parsed.data.binanceId,
+        defaultMonthlyFeeUsdCents: parsed.data.defaultMonthlyFee,
+      },
+      update: {
+        paymentInstructions: parsed.data.paymentInstructions,
+        binanceQrDataUrl: parsed.data.binanceQrDataUrl,
+        binanceId: parsed.data.binanceId,
+        defaultMonthlyFeeUsdCents: parsed.data.defaultMonthlyFee,
+      },
+    })
+  );
 
   revalidatePath("/admin");
   revalidatePath("/billing");

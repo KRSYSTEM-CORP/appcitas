@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { prisma } from "@/lib/prisma";
+import { withTenant } from "@/lib/tenant-db";
 import { getSession, requireOwner } from "@/lib/session";
 import {
   BrandingSchema,
@@ -29,10 +29,12 @@ export async function getBranding(): Promise<BusinessBrandingOnly> {
   const session = await getSession();
   if (!session) return NO_BRANDING;
 
-  const business = await prisma.business.findUnique({
-    where: { id: session.businessId },
-    select: { logoDataUrl: true, brandColor: true, brandBackground: true },
-  });
+  const business = await withTenant(session.businessId, (tx) =>
+    tx.business.findUnique({
+      where: { id: session.businessId },
+      select: { logoDataUrl: true, brandColor: true, brandBackground: true },
+    })
+  );
   if (!business) return NO_BRANDING;
 
   return business;
@@ -64,10 +66,12 @@ export type BusinessConfig = {
 export async function getBusinessConfig(): Promise<BusinessConfig> {
   const { businessId } = await requireOwner();
 
-  const business = await prisma.business.findUniqueOrThrow({
-    where: { id: businessId },
-    include: { businessHours: { orderBy: { weekday: "asc" } } },
-  });
+  const business = await withTenant(businessId, (tx) =>
+    tx.business.findUniqueOrThrow({
+      where: { id: businessId },
+      include: { businessHours: { orderBy: { weekday: "asc" } } },
+    })
+  );
 
   return {
     name: business.name,
@@ -115,44 +119,46 @@ export async function getFxInfo(): Promise<FxInfo> {
   const session = await getSession();
   if (!session) return { fxEnabled: false, localCurrencyCode: "USD", foreignCurrencyCode: "USD", rate: null };
 
-  const business = await prisma.business.findUnique({
-    where: { id: session.businessId },
-    select: {
-      fxEnabled: true,
-      localCurrencyCode: true,
-      foreignCurrencyCode: true,
-      exchangeRate: true,
-      exchangeRateUpdatedAt: true,
-    },
-  });
+  return withTenant(session.businessId, async (tx) => {
+    const business = await tx.business.findUnique({
+      where: { id: session.businessId },
+      select: {
+        fxEnabled: true,
+        localCurrencyCode: true,
+        foreignCurrencyCode: true,
+        exchangeRate: true,
+        exchangeRateUpdatedAt: true,
+      },
+    });
 
-  let rate = business?.exchangeRate != null ? Number(business.exchangeRate) : null;
+    let rate = business?.exchangeRate != null ? Number(business.exchangeRate) : null;
 
-  const isStale =
-    business?.localCurrencyCode === "VES" &&
-    business.fxEnabled &&
-    (business.exchangeRateUpdatedAt == null ||
-      Date.now() - business.exchangeRateUpdatedAt.getTime() > STALE_RATE_MS);
+    const isStale =
+      business?.localCurrencyCode === "VES" &&
+      business.fxEnabled &&
+      (business.exchangeRateUpdatedAt == null ||
+        Date.now() - business.exchangeRateUpdatedAt.getTime() > STALE_RATE_MS);
 
-  if (isStale && business) {
-    try {
-      const freshRate = await fetchBcvRate(business.foreignCurrencyCode as "USD" | "EUR");
-      await prisma.business.update({
-        where: { id: session.businessId },
-        data: { exchangeRate: freshRate, exchangeRateUpdatedAt: new Date() },
-      });
-      rate = freshRate;
-    } catch {
-      // Keep serving the last known rate; the next page load or the cron retries.
+    if (isStale && business) {
+      try {
+        const freshRate = await fetchBcvRate(business.foreignCurrencyCode as "USD" | "EUR");
+        await tx.business.update({
+          where: { id: session.businessId },
+          data: { exchangeRate: freshRate, exchangeRateUpdatedAt: new Date() },
+        });
+        rate = freshRate;
+      } catch {
+        // Keep serving the last known rate; the next page load or the cron retries.
+      }
     }
-  }
 
-  return {
-    fxEnabled: business?.fxEnabled ?? false,
-    localCurrencyCode: business?.localCurrencyCode ?? "USD",
-    foreignCurrencyCode: business?.foreignCurrencyCode ?? "USD",
-    rate,
-  };
+    return {
+      fxEnabled: business?.fxEnabled ?? false,
+      localCurrencyCode: business?.localCurrencyCode ?? "USD",
+      foreignCurrencyCode: business?.foreignCurrencyCode ?? "USD",
+      rate,
+    };
+  });
 }
 
 export type DayHours = {
@@ -170,10 +176,12 @@ export async function getBusinessHourForWeekday(weekday: number): Promise<DayHou
   const session = await getSession();
   if (!session) return null;
 
-  const hour = await prisma.businessHour.findUnique({
-    where: { businessId_weekday: { businessId: session.businessId, weekday } },
-    select: { isClosed: true, opensAt: true, closesAt: true, breakStart: true, breakEnd: true },
-  });
+  const hour = await withTenant(session.businessId, (tx) =>
+    tx.businessHour.findUnique({
+      where: { businessId_weekday: { businessId: session.businessId, weekday } },
+      select: { isClosed: true, opensAt: true, closesAt: true, breakStart: true, breakEnd: true },
+    })
+  );
   return hour ?? { isClosed: true, opensAt: null, closesAt: null, breakStart: null, breakEnd: null };
 }
 
@@ -191,10 +199,12 @@ export async function updateReferenceCurrencySettings(input: {
     return { success: false, error: parsed.error.issues[0]?.message ?? "Datos inválidos" };
   }
 
-  await prisma.business.update({
-    where: { id: businessId },
-    data: { fxEnabled: parsed.data.fxEnabled, foreignCurrencyCode: parsed.data.foreignCurrencyCode },
-  });
+  await withTenant(businessId, (tx) =>
+    tx.business.update({
+      where: { id: businessId },
+      data: { fxEnabled: parsed.data.fxEnabled, foreignCurrencyCode: parsed.data.foreignCurrencyCode },
+    })
+  );
 
   revalidatePath("/settings", "layout");
   revalidatePath("/agenda");
@@ -215,10 +225,12 @@ export async function updateLocalCurrency(formData: FormData): Promise<ActionRes
     return { success: false, error: parsed.error.issues[0]?.message ?? "Moneda inválida" };
   }
 
-  await prisma.business.update({
-    where: { id: businessId },
-    data: { localCurrencyCode: parsed.data.localCurrencyCode },
-  });
+  await withTenant(businessId, (tx) =>
+    tx.business.update({
+      where: { id: businessId },
+      data: { localCurrencyCode: parsed.data.localCurrencyCode },
+    })
+  );
 
   revalidatePath("/settings", "layout");
   revalidatePath("/agenda");
@@ -237,10 +249,12 @@ export async function updateExchangeRate(formData: FormData): Promise<ActionResu
     return { success: false, error: parsed.error.issues[0]?.message ?? "Tasa inválida" };
   }
 
-  await prisma.business.update({
-    where: { id: businessId },
-    data: { exchangeRate: parsed.data.rate, exchangeRateUpdatedAt: new Date() },
-  });
+  await withTenant(businessId, (tx) =>
+    tx.business.update({
+      where: { id: businessId },
+      data: { exchangeRate: parsed.data.rate, exchangeRateUpdatedAt: new Date() },
+    })
+  );
 
   revalidatePath("/settings", "layout");
   revalidatePath("/agenda");
@@ -267,10 +281,12 @@ export async function fetchAndUpdateBcvRate(currency: string): Promise<BcvRateRe
     return { success: false, error: "Elige USD o EUR como moneda de referencia para usar la tasa BCV" };
   }
 
-  const business = await prisma.business.findUniqueOrThrow({
-    where: { id: businessId },
-    select: { localCurrencyCode: true },
-  });
+  const business = await withTenant(businessId, (tx) =>
+    tx.business.findUniqueOrThrow({
+      where: { id: businessId },
+      select: { localCurrencyCode: true },
+    })
+  );
   if (business.localCurrencyCode !== "VES") {
     return { success: false, error: "La tasa del BCV solo aplica para bolívares (VES)" };
   }
@@ -282,10 +298,12 @@ export async function fetchAndUpdateBcvRate(currency: string): Promise<BcvRateRe
     return { success: false, error: "No se pudo consultar la tasa del BCV. Intenta de nuevo." };
   }
 
-  await prisma.business.update({
-    where: { id: businessId },
-    data: { fxEnabled: true, foreignCurrencyCode: currency, exchangeRate: rate, exchangeRateUpdatedAt: new Date() },
-  });
+  await withTenant(businessId, (tx) =>
+    tx.business.update({
+      where: { id: businessId },
+      data: { fxEnabled: true, foreignCurrencyCode: currency, exchangeRate: rate, exchangeRateUpdatedAt: new Date() },
+    })
+  );
 
   revalidatePath("/settings", "layout");
   revalidatePath("/agenda");
@@ -300,10 +318,12 @@ export async function fetchAndUpdateBcvRate(currency: string): Promise<BcvRateRe
 export async function getBusinessCurrency(): Promise<string> {
   const session = await getSession();
   if (!session) return DEFAULT_CURRENCY_CODE;
-  const business = await prisma.business.findUnique({
-    where: { id: session.businessId },
-    select: { localCurrencyCode: true },
-  });
+  const business = await withTenant(session.businessId, (tx) =>
+    tx.business.findUnique({
+      where: { id: session.businessId },
+      select: { localCurrencyCode: true },
+    })
+  );
   return business?.localCurrencyCode ?? DEFAULT_CURRENCY_CODE;
 }
 
@@ -321,15 +341,17 @@ export async function updateBranding(formData: FormData): Promise<ActionResult> 
     return { success: false, error: parsed.error.issues[0]?.message ?? "Datos inválidos" };
   }
 
-  await prisma.business.update({
-    where: { id: businessId },
-    data: {
-      name: parsed.data.businessName,
-      logoDataUrl: parsed.data.logoDataUrl || null,
-      brandColor: parsed.data.brandColor || null,
-      brandBackground: parsed.data.brandBackground || null,
-    },
-  });
+  await withTenant(businessId, (tx) =>
+    tx.business.update({
+      where: { id: businessId },
+      data: {
+        name: parsed.data.businessName,
+        logoDataUrl: parsed.data.logoDataUrl || null,
+        brandColor: parsed.data.brandColor || null,
+        brandBackground: parsed.data.brandBackground || null,
+      },
+    })
+  );
 
   revalidatePath("/settings", "layout");
   revalidatePath("/", "layout");
@@ -344,9 +366,9 @@ export async function updateBusinessHours(hours: BusinessConfig["hours"]): Promi
     return { success: false, error: parsed.error.issues[0]?.message ?? "Horario inválido" };
   }
 
-  await prisma.$transaction(
-    parsed.data.hours.map((h) =>
-      prisma.businessHour.update({
+  await withTenant(businessId, async (tx) => {
+    for (const h of parsed.data.hours) {
+      await tx.businessHour.update({
         where: { businessId_weekday: { businessId, weekday: h.weekday } },
         data: {
           isClosed: h.isClosed,
@@ -355,9 +377,9 @@ export async function updateBusinessHours(hours: BusinessConfig["hours"]): Promi
           breakStart: h.isClosed ? null : h.breakStart || null,
           breakEnd: h.isClosed ? null : h.breakEnd || null,
         },
-      }),
-    ),
-  );
+      });
+    }
+  });
 
   revalidatePath("/settings", "layout");
   return { success: true };
@@ -370,7 +392,7 @@ export async function updateBusinessHours(hours: BusinessConfig["hours"]): Promi
 export async function updateSpecialistAssignmentMode(mode: SpecialistAssignmentMode): Promise<ActionResult> {
   const { businessId } = await requireOwner();
 
-  await prisma.business.update({ where: { id: businessId }, data: { specialistAssignmentMode: mode } });
+  await withTenant(businessId, (tx) => tx.business.update({ where: { id: businessId }, data: { specialistAssignmentMode: mode } }));
 
   revalidatePath("/settings", "layout");
   return { success: true };

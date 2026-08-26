@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { prisma } from "@/lib/prisma";
+import { withTenant } from "@/lib/tenant-db";
 import { requireSession } from "@/lib/session";
 import { zonedTimeToUtc } from "@/lib/timezone";
 import { getAvailableSlots, getAvailableSlotsAnySpecialist } from "@/lib/actions/public";
@@ -41,32 +41,34 @@ export type AppointmentListItem = {
 export async function listAppointmentsInRange(start: Date, end: Date): Promise<AppointmentListItem[]> {
   const { businessId } = await requireSession();
 
-  return prisma.appointment.findMany({
-    where: { businessId, startsAt: { gte: start, lt: end } },
-    include: {
-      client: { select: { id: true, firstName: true, lastName: true, phone: true } },
-      specialist: { select: { id: true, displayName: true } },
-      service: {
-        select: { id: true, name: true, durationMinutes: true, basePriceCents: true, priceCurrencyCode: true },
-      },
-      sessionPackage: { select: { id: true, totalSessions: true, paymentMode: true } },
-      transactions: {
-        select: {
-          id: true,
-          amountLocalCents: true,
-          amountForeignCents: true,
-          paidCurrencyCode: true,
-          currencyLocal: true,
-          currencyForeign: true,
-          paymentMethod: true,
-          reference: true,
-          paidAt: true,
+  return withTenant(businessId, (tx) =>
+    tx.appointment.findMany({
+      where: { businessId, startsAt: { gte: start, lt: end } },
+      include: {
+        client: { select: { id: true, firstName: true, lastName: true, phone: true } },
+        specialist: { select: { id: true, displayName: true } },
+        service: {
+          select: { id: true, name: true, durationMinutes: true, basePriceCents: true, priceCurrencyCode: true },
         },
-        orderBy: { paidAt: "asc" },
+        sessionPackage: { select: { id: true, totalSessions: true, paymentMode: true } },
+        transactions: {
+          select: {
+            id: true,
+            amountLocalCents: true,
+            amountForeignCents: true,
+            paidCurrencyCode: true,
+            currencyLocal: true,
+            currencyForeign: true,
+            paymentMethod: true,
+            reference: true,
+            paidAt: true,
+          },
+          orderBy: { paidAt: "asc" },
+        },
       },
-    },
-    orderBy: { startsAt: "asc" },
-  });
+      orderBy: { startsAt: "asc" },
+    })
+  );
 }
 
 export type CreateAppointmentInput = {
@@ -93,68 +95,72 @@ export async function createAppointment(input: CreateAppointmentInput): Promise<
     return { success: false, error: "Elige un servicio" };
   }
 
-  const [specialist, service] = await Promise.all([
-    input.specialistId
-      ? prisma.specialist.findFirst({ where: { id: input.specialistId, businessId, active: true } })
-      : null,
-    prisma.service.findFirst({ where: { id: input.serviceId, businessId, active: true } }),
-  ]);
-  if (input.specialistId && !specialist) return { success: false, error: "Especialista no válido" };
-  if (!service) return { success: false, error: "Servicio no válido" };
+  const result = await withTenant(businessId, async (tx) => {
+    const [specialist, service] = await Promise.all([
+      input.specialistId
+        ? tx.specialist.findFirst({ where: { id: input.specialistId, businessId, active: true } })
+        : null,
+      tx.service.findFirst({ where: { id: input.serviceId, businessId, active: true } }),
+    ]);
+    if (input.specialistId && !specialist) return { error: "Especialista no válido" };
+    if (!service) return { error: "Servicio no válido" };
 
-  const startsAt = zonedTimeToUtc(input.dateKey, input.time);
-  if (Number.isNaN(startsAt.getTime())) return { success: false, error: "Fecha u hora inválidas" };
-  const endsAt = new Date(startsAt.getTime() + service.durationMinutes * 60_000);
+    const startsAt = zonedTimeToUtc(input.dateKey, input.time);
+    if (Number.isNaN(startsAt.getTime())) return { error: "Fecha u hora inválidas" };
+    const endsAt = new Date(startsAt.getTime() + service.durationMinutes * 60_000);
 
-  if (specialist) {
-    const conflict = await prisma.appointment.findFirst({
-      where: {
-        specialistId: specialist.id,
-        status: { notIn: ["CANCELLED", "NO_SHOW"] },
-        startsAt: { lt: endsAt },
-        endsAt: { gt: startsAt },
-      },
-    });
-    if (conflict) return { success: false, error: "El especialista ya tiene una cita en ese horario" };
-  }
-
-  let clientId = input.clientId;
-  if (!clientId && input.newClient) {
-    const trimmedPhone = input.newClient.phone.trim();
-    if (!input.newClient.firstName.trim() || !input.newClient.lastName.trim() || !trimmedPhone) {
-      return { success: false, error: "Nombre, apellido y teléfono del cliente son obligatorios" };
-    }
-    const existing = await prisma.client.findUnique({
-      where: { businessId_phone: { businessId, phone: trimmedPhone } },
-    });
-    if (existing) {
-      clientId = existing.id;
-    } else {
-      const created = await prisma.client.create({
-        data: {
-          businessId,
-          firstName: input.newClient.firstName.trim(),
-          lastName: input.newClient.lastName.trim(),
-          phone: trimmedPhone,
-          email: input.newClient.email?.trim() || null,
+    if (specialist) {
+      const conflict = await tx.appointment.findFirst({
+        where: {
+          specialistId: specialist.id,
+          status: { notIn: ["CANCELLED", "NO_SHOW"] },
+          startsAt: { lt: endsAt },
+          endsAt: { gt: startsAt },
         },
       });
-      clientId = created.id;
+      if (conflict) return { error: "El especialista ya tiene una cita en ese horario" };
     }
-  }
-  if (!clientId) return { success: false, error: "Elige un cliente o registra uno nuevo" };
 
-  await prisma.appointment.create({
-    data: {
-      businessId,
-      clientId,
-      specialistId: specialist?.id ?? null,
-      serviceId: service.id,
-      startsAt,
-      endsAt,
-      notes: input.notes?.trim() || null,
-    },
+    let clientId = input.clientId;
+    if (!clientId && input.newClient) {
+      const trimmedPhone = input.newClient.phone.trim();
+      if (!input.newClient.firstName.trim() || !input.newClient.lastName.trim() || !trimmedPhone) {
+        return { error: "Nombre, apellido y teléfono del cliente son obligatorios" };
+      }
+      const existing = await tx.client.findUnique({
+        where: { businessId_phone: { businessId, phone: trimmedPhone } },
+      });
+      if (existing) {
+        clientId = existing.id;
+      } else {
+        const created = await tx.client.create({
+          data: {
+            businessId,
+            firstName: input.newClient.firstName.trim(),
+            lastName: input.newClient.lastName.trim(),
+            phone: trimmedPhone,
+            email: input.newClient.email?.trim() || null,
+          },
+        });
+        clientId = created.id;
+      }
+    }
+    if (!clientId) return { error: "Elige un cliente o registra uno nuevo" };
+
+    await tx.appointment.create({
+      data: {
+        businessId,
+        clientId,
+        specialistId: specialist?.id ?? null,
+        serviceId: service.id,
+        startsAt,
+        endsAt,
+        notes: input.notes?.trim() || null,
+      },
+    });
+    return { error: null };
   });
+  if (result.error) return { success: false, error: result.error };
 
   revalidatePath("/agenda");
   return { success: true };
@@ -169,30 +175,34 @@ export async function createAppointment(input: CreateAppointmentInput): Promise<
 export async function assignSpecialist(appointmentId: string, specialistId: string): Promise<ActionResult> {
   const { businessId } = await requireSession();
 
-  const appointment = await prisma.appointment.findFirst({ where: { id: appointmentId, businessId } });
-  if (!appointment) return { success: false, error: "Cita no encontrada" };
+  const result = await withTenant(businessId, async (tx) => {
+    const appointment = await tx.appointment.findFirst({ where: { id: appointmentId, businessId } });
+    if (!appointment) return { error: "Cita no encontrada" };
 
-  const specialist = await prisma.specialist.findFirst({
-    where: { id: specialistId, businessId, active: true },
-    include: { services: { where: { serviceId: appointment.serviceId } } },
+    const specialist = await tx.specialist.findFirst({
+      where: { id: specialistId, businessId, active: true },
+      include: { services: { where: { serviceId: appointment.serviceId } } },
+    });
+    if (!specialist) return { error: "Especialista no válido" };
+    if (specialist.services.length === 0) {
+      return { error: "Ese especialista no ofrece el servicio de esta cita" };
+    }
+
+    const conflict = await tx.appointment.findFirst({
+      where: {
+        id: { not: appointmentId },
+        specialistId,
+        status: { notIn: ["CANCELLED", "NO_SHOW"] },
+        startsAt: { lt: appointment.endsAt },
+        endsAt: { gt: appointment.startsAt },
+      },
+    });
+    if (conflict) return { error: "Ese especialista ya tiene una cita en ese horario" };
+
+    await tx.appointment.update({ where: { id: appointmentId }, data: { specialistId } });
+    return { error: null };
   });
-  if (!specialist) return { success: false, error: "Especialista no válido" };
-  if (specialist.services.length === 0) {
-    return { success: false, error: "Ese especialista no ofrece el servicio de esta cita" };
-  }
-
-  const conflict = await prisma.appointment.findFirst({
-    where: {
-      id: { not: appointmentId },
-      specialistId,
-      status: { notIn: ["CANCELLED", "NO_SHOW"] },
-      startsAt: { lt: appointment.endsAt },
-      endsAt: { gt: appointment.startsAt },
-    },
-  });
-  if (conflict) return { success: false, error: "Ese especialista ya tiene una cita en ese horario" };
-
-  await prisma.appointment.update({ where: { id: appointmentId }, data: { specialistId } });
+  if (result.error) return { success: false, error: result.error };
 
   revalidatePath("/agenda");
   return { success: true };
@@ -204,10 +214,12 @@ export async function updateAppointmentStatus(
 ): Promise<ActionResult> {
   const { businessId } = await requireSession();
 
-  const { count } = await prisma.appointment.updateMany({
-    where: { id: appointmentId, businessId },
-    data: { status },
-  });
+  const { count } = await withTenant(businessId, (tx) =>
+    tx.appointment.updateMany({
+      where: { id: appointmentId, businessId },
+      data: { status },
+    })
+  );
   if (count === 0) return { success: false, error: "Cita no encontrada" };
 
   revalidatePath("/agenda");

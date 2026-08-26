@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { prisma } from "@/lib/prisma";
+import { withTenant } from "@/lib/tenant-db";
 import { requireSession } from "@/lib/session";
 import { ClientSchema } from "@/lib/validations";
 import type { ActionResult } from "@/lib/types";
@@ -21,15 +21,19 @@ export type ClientListItem = {
 // client picker (new appointment/package forms reuse this same query).
 export async function listClients(): Promise<ClientListItem[]> {
   const { businessId } = await requireSession();
-  return prisma.client.findMany({
-    where: { businessId, active: true },
-    orderBy: [{ firstName: "asc" }, { lastName: "asc" }],
-  });
+  return withTenant(businessId, (tx) =>
+    tx.client.findMany({
+      where: { businessId, active: true },
+      orderBy: [{ firstName: "asc" }, { lastName: "asc" }],
+    })
+  );
 }
 
 export async function getClient(clientId: string): Promise<ClientListItem | null> {
   const { businessId } = await requireSession();
-  return prisma.client.findFirst({ where: { id: clientId, businessId, active: true } });
+  return withTenant(businessId, (tx) =>
+    tx.client.findFirst({ where: { id: clientId, businessId, active: true } })
+  );
 }
 
 export type ClientCrmItem = ClientListItem & {
@@ -44,14 +48,16 @@ export type ClientCrmItem = ClientListItem & {
 // doesn't count as a real visit here even if it's in the past.
 export async function listClientsForCrm(): Promise<ClientCrmItem[]> {
   const { businessId } = await requireSession();
-  const [clients, attended] = await Promise.all([
-    prisma.client.findMany({ where: { businessId, active: true } }),
-    prisma.appointment.findMany({
-      where: { businessId, status: "ATTENDED" },
-      select: { clientId: true, startsAt: true, service: { select: { name: true } } },
-      orderBy: { startsAt: "desc" },
-    }),
-  ]);
+  const [clients, attended] = await withTenant(businessId, (tx) =>
+    Promise.all([
+      tx.client.findMany({ where: { businessId, active: true } }),
+      tx.appointment.findMany({
+        where: { businessId, status: "ATTENDED" },
+        select: { clientId: true, startsAt: true, service: { select: { name: true } } },
+        orderBy: { startsAt: "desc" },
+      }),
+    ])
+  );
 
   const lastByClient = new Map<string, { startsAt: Date; serviceName: string }>();
   const visitCounts = new Map<string, number>();
@@ -102,23 +108,25 @@ export async function createClient(formData: FormData): Promise<ActionResult> {
     return { success: false, error: parsed.error.issues[0]?.message ?? "Datos inválidos" };
   }
 
-  const existing = await prisma.client.findUnique({
-    where: { businessId_phone: { businessId, phone: parsed.data.phone } },
-  });
-  if (existing) {
-    return { success: false, error: "Ya existe un cliente con ese teléfono" };
-  }
+  const created = await withTenant(businessId, async (tx) => {
+    const existing = await tx.client.findUnique({
+      where: { businessId_phone: { businessId, phone: parsed.data.phone } },
+    });
+    if (existing) return null;
 
-  await prisma.client.create({
-    data: {
-      businessId,
-      firstName: parsed.data.firstName,
-      lastName: parsed.data.lastName,
-      phone: parsed.data.phone,
-      email: parsed.data.email || null,
-      notes: parsed.data.notes || null,
-    },
+    await tx.client.create({
+      data: {
+        businessId,
+        firstName: parsed.data.firstName,
+        lastName: parsed.data.lastName,
+        phone: parsed.data.phone,
+        email: parsed.data.email || null,
+        notes: parsed.data.notes || null,
+      },
+    });
+    return true;
   });
+  if (!created) return { success: false, error: "Ya existe un cliente con ese teléfono" };
 
   revalidatePath("/clients");
   return { success: true };
@@ -132,24 +140,27 @@ export async function updateClient(clientId: string, formData: FormData): Promis
     return { success: false, error: parsed.error.issues[0]?.message ?? "Datos inválidos" };
   }
 
-  const existing = await prisma.client.findUnique({
-    where: { businessId_phone: { businessId, phone: parsed.data.phone } },
-  });
-  if (existing && existing.id !== clientId) {
-    return { success: false, error: "Ya existe un cliente con ese teléfono" };
-  }
+  const result = await withTenant(businessId, async (tx) => {
+    const existing = await tx.client.findUnique({
+      where: { businessId_phone: { businessId, phone: parsed.data.phone } },
+    });
+    if (existing && existing.id !== clientId) return "duplicate" as const;
 
-  const { count } = await prisma.client.updateMany({
-    where: { id: clientId, businessId },
-    data: {
-      firstName: parsed.data.firstName,
-      lastName: parsed.data.lastName,
-      phone: parsed.data.phone,
-      email: parsed.data.email || null,
-      notes: parsed.data.notes || null,
-    },
+    const { count } = await tx.client.updateMany({
+      where: { id: clientId, businessId },
+      data: {
+        firstName: parsed.data.firstName,
+        lastName: parsed.data.lastName,
+        phone: parsed.data.phone,
+        email: parsed.data.email || null,
+        notes: parsed.data.notes || null,
+      },
+    });
+    return count === 0 ? ("not_found" as const) : ("ok" as const);
   });
-  if (count === 0) return { success: false, error: "Cliente no encontrado" };
+
+  if (result === "duplicate") return { success: false, error: "Ya existe un cliente con ese teléfono" };
+  if (result === "not_found") return { success: false, error: "Cliente no encontrado" };
 
   revalidatePath("/clients");
   revalidatePath(`/clients/${clientId}`);
@@ -163,10 +174,12 @@ export async function updateClient(clientId: string, formData: FormData): Promis
 export async function deleteClient(clientId: string): Promise<ActionResult> {
   const { businessId } = await requireSession();
 
-  const { count } = await prisma.client.updateMany({
-    where: { id: clientId, businessId },
-    data: { active: false },
-  });
+  const { count } = await withTenant(businessId, (tx) =>
+    tx.client.updateMany({
+      where: { id: clientId, businessId },
+      data: { active: false },
+    })
+  );
   if (count === 0) return { success: false, error: "Cliente no encontrado" };
 
   revalidatePath("/clients");

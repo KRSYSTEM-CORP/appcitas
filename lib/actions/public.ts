@@ -1,7 +1,8 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { prisma } from "@/lib/prisma";
+import type { Prisma } from "@prisma/client";
+import { withTenant, withSuperAdmin } from "@/lib/tenant-db";
 import { ClientSchema } from "@/lib/validations";
 import { zonedTimeToUtc, zonedMidnightUtc, zonedHM, weekdayOf } from "@/lib/timezone";
 import type { ActionResult } from "@/lib/types";
@@ -10,7 +11,11 @@ import type { AppointmentStatus, SpecialistAssignmentMode } from "@prisma/client
 // Everything in this file is intentionally unauthenticated — it's the
 // surface a not-signed-in end client hits at /book/[subdomain]. Every query
 // is scoped by the resolved businessId and returns only what a booking
-// widget needs (no emails, phones, or other clients' data).
+// widget needs (no emails, phones, or other clients' data). Lookups that
+// don't yet have a businessId in hand (subdomain resolution, cancelToken
+// lookup) use withSuperAdmin — the RLS bypass — since that's the whole point
+// of those two lookups; everything after resolves to a single businessId and
+// switches to withTenant so RLS still backstops it like any other query.
 
 export type PublicBusiness = {
   id: string;
@@ -27,22 +32,24 @@ export type PublicBusiness = {
 };
 
 export async function getPublicBusiness(subdomain: string): Promise<PublicBusiness | null> {
-  const business = await prisma.business.findUnique({
-    where: { subdomain: subdomain.trim().toLowerCase() },
-    select: {
-      id: true,
-      name: true,
-      subdomain: true,
-      logoDataUrl: true,
-      brandColor: true,
-      brandBackground: true,
-      localCurrencyCode: true,
-      fxEnabled: true,
-      foreignCurrencyCode: true,
-      exchangeRate: true,
-      specialistAssignmentMode: true,
-    },
-  });
+  const business = await withSuperAdmin((tx) =>
+    tx.business.findUnique({
+      where: { subdomain: subdomain.trim().toLowerCase() },
+      select: {
+        id: true,
+        name: true,
+        subdomain: true,
+        logoDataUrl: true,
+        brandColor: true,
+        brandBackground: true,
+        localCurrencyCode: true,
+        fxEnabled: true,
+        foreignCurrencyCode: true,
+        exchangeRate: true,
+        specialistAssignmentMode: true,
+      },
+    })
+  );
   if (!business) return null;
 
   const { exchangeRate, ...rest } = business;
@@ -70,32 +77,34 @@ export type PublicSpecialist = {
 export async function listPublicCatalog(
   businessId: string,
 ): Promise<{ services: PublicService[]; specialists: PublicSpecialist[] }> {
-  const [services, specialists] = await Promise.all([
-    prisma.service.findMany({
-      where: { businessId, active: true },
-      select: {
-        id: true,
-        name: true,
-        description: true,
-        durationMinutes: true,
-        basePriceCents: true,
-        priceCurrencyCode: true,
-        category: true,
-      },
-      orderBy: { name: "asc" },
-    }),
-    prisma.specialist.findMany({
-      where: { businessId, active: true },
-      select: {
-        id: true,
-        displayName: true,
-        bio: true,
-        avatarDataUrl: true,
-        services: { select: { serviceId: true } },
-      },
-      orderBy: { displayName: "asc" },
-    }),
-  ]);
+  const [services, specialists] = await withTenant(businessId, (tx) =>
+    Promise.all([
+      tx.service.findMany({
+        where: { businessId, active: true },
+        select: {
+          id: true,
+          name: true,
+          description: true,
+          durationMinutes: true,
+          basePriceCents: true,
+          priceCurrencyCode: true,
+          category: true,
+        },
+        orderBy: { name: "asc" },
+      }),
+      tx.specialist.findMany({
+        where: { businessId, active: true },
+        select: {
+          id: true,
+          displayName: true,
+          bio: true,
+          avatarDataUrl: true,
+          services: { select: { serviceId: true } },
+        },
+        orderBy: { displayName: "asc" },
+      }),
+    ])
+  );
 
   return {
     services,
@@ -116,15 +125,18 @@ type DayInterval = { start: Date; end: Date };
 // The business/service open-close window for one weekday, before any
 // specialist-level restriction is applied — shared by the fixed-specialist
 // and any-specialist slot functions below so they agree on the base grid.
+// Takes the caller's own tx (rather than opening its own withTenant) since
+// it's always called from inside one of those two functions' transaction.
 async function resolveBaseWindow(
+  tx: Prisma.TransactionClient,
   businessId: string,
   serviceId: string,
   dateKey: string,
 ): Promise<{ open: Date; close: Date; breaks: DayInterval[]; durationMinutes: number } | null> {
   const weekday = weekdayOf(dateKey);
   const [businessHours, service] = await Promise.all([
-    prisma.businessHour.findUnique({ where: { businessId_weekday: { businessId, weekday } } }),
-    prisma.service.findFirst({
+    tx.businessHour.findUnique({ where: { businessId_weekday: { businessId, weekday } } }),
+    tx.service.findFirst({
       where: { id: serviceId, businessId, active: true },
       include: { hours: { where: { weekday } } },
     }),
@@ -214,22 +226,24 @@ export async function getAvailableSlots(
   const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60_000);
   const weekday = weekdayOf(dateKey);
 
-  const [base, specialist, appointments] = await Promise.all([
-    resolveBaseWindow(businessId, serviceId, dateKey),
-    prisma.specialist.findFirst({
-      where: { id: specialistId, businessId },
-      select: { hasCustomHours: true, hours: { where: { weekday } } },
-    }),
-    prisma.appointment.findMany({
-      where: {
-        businessId,
-        specialistId,
-        status: { notIn: ["CANCELLED", "NO_SHOW"] },
-        startsAt: { gte: dayStart, lt: dayEnd },
-      },
-      select: { startsAt: true, endsAt: true },
-    }),
-  ]);
+  const [base, specialist, appointments] = await withTenant(businessId, (tx) =>
+    Promise.all([
+      resolveBaseWindow(tx, businessId, serviceId, dateKey),
+      tx.specialist.findFirst({
+        where: { id: specialistId, businessId },
+        select: { hasCustomHours: true, hours: { where: { weekday } } },
+      }),
+      tx.appointment.findMany({
+        where: {
+          businessId,
+          specialistId,
+          status: { notIn: ["CANCELLED", "NO_SHOW"] },
+          startsAt: { gte: dayStart, lt: dayEnd },
+        },
+        select: { startsAt: true, endsAt: true },
+      }),
+    ])
+  );
   if (!base || !specialist) return [];
 
   const window = narrowToSpecialist(base, specialist.hasCustomHours, specialist.hours[0], dateKey);
@@ -260,47 +274,49 @@ export async function getAvailableSlotsAnySpecialist(
   const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60_000);
   const weekday = weekdayOf(dateKey);
 
-  const base = await resolveBaseWindow(businessId, serviceId, dateKey);
-  if (!base) return [];
+  return withTenant(businessId, async (tx) => {
+    const base = await resolveBaseWindow(tx, businessId, serviceId, dateKey);
+    if (!base) return [];
 
-  const [specialists, unassignedAppointments] = await Promise.all([
-    prisma.specialist.findMany({
-      where: { businessId, active: true, services: { some: { serviceId } } },
-      select: {
-        id: true,
-        hasCustomHours: true,
-        hours: { where: { weekday } },
-        appointments: {
-          where: { status: { notIn: ["CANCELLED", "NO_SHOW"] }, startsAt: { gte: dayStart, lt: dayEnd } },
-          select: { startsAt: true, endsAt: true },
+    const [specialists, unassignedAppointments] = await Promise.all([
+      tx.specialist.findMany({
+        where: { businessId, active: true, services: { some: { serviceId } } },
+        select: {
+          id: true,
+          hasCustomHours: true,
+          hours: { where: { weekday } },
+          appointments: {
+            where: { status: { notIn: ["CANCELLED", "NO_SHOW"] }, startsAt: { gte: dayStart, lt: dayEnd } },
+            select: { startsAt: true, endsAt: true },
+          },
         },
-      },
-    }),
-    prisma.appointment.findMany({
-      where: {
-        businessId,
-        serviceId,
-        specialistId: null,
-        status: { notIn: ["CANCELLED", "NO_SHOW"] },
-        startsAt: { gte: dayStart, lt: dayEnd },
-      },
-      select: { startsAt: true, endsAt: true },
-    }),
-  ]);
-  if (specialists.length === 0) return [];
+      }),
+      tx.appointment.findMany({
+        where: {
+          businessId,
+          serviceId,
+          specialistId: null,
+          status: { notIn: ["CANCELLED", "NO_SHOW"] },
+          startsAt: { gte: dayStart, lt: dayEnd },
+        },
+        select: { startsAt: true, endsAt: true },
+      }),
+    ]);
+    if (specialists.length === 0) return [];
 
-  const specialistWindows = specialists
-    .map((s) => ({ appointments: s.appointments, window: narrowToSpecialist(base, s.hasCustomHours, s.hours[0], dateKey) }))
-    .filter((s): s is { appointments: typeof specialists[number]["appointments"]; window: NonNullable<ReturnType<typeof narrowToSpecialist>> } => s.window != null);
+    const specialistWindows = specialists
+      .map((s) => ({ appointments: s.appointments, window: narrowToSpecialist(base, s.hasCustomHours, s.hours[0], dateKey) }))
+      .filter((s): s is { appointments: typeof specialists[number]["appointments"]; window: NonNullable<ReturnType<typeof narrowToSpecialist>> } => s.window != null);
 
-  return generateSlots(base, base.durationMinutes, (slotStart, slotEnd) => {
-    const availableCount = specialistWindows.filter((s) => {
-      if (slotStart < s.window.open || slotEnd > s.window.close) return false;
-      if (s.window.breaks.some((b) => slotStart < b.end && slotEnd > b.start)) return false;
-      return !s.appointments.some((a) => slotStart < a.endsAt && slotEnd > a.startsAt);
-    }).length;
-    const claimedByUnassigned = unassignedAppointments.filter((a) => slotStart < a.endsAt && slotEnd > a.startsAt).length;
-    return availableCount > claimedByUnassigned;
+    return generateSlots(base, base.durationMinutes, (slotStart, slotEnd) => {
+      const availableCount = specialistWindows.filter((s) => {
+        if (slotStart < s.window.open || slotEnd > s.window.close) return false;
+        if (s.window.breaks.some((b) => slotStart < b.end && slotEnd > b.start)) return false;
+        return !s.appointments.some((a) => slotStart < a.endsAt && slotEnd > a.startsAt);
+      }).length;
+      const claimedByUnassigned = unassignedAppointments.filter((a) => slotStart < a.endsAt && slotEnd > a.startsAt).length;
+      return availableCount > claimedByUnassigned;
+    });
   });
 }
 
@@ -318,7 +334,9 @@ export type PublicBookingInput = {
 export type CreatePublicAppointmentResult = { success: true; cancelToken: string } | { success: false; error: string };
 
 export async function createPublicAppointment(input: PublicBookingInput): Promise<CreatePublicAppointmentResult> {
-  const business = await prisma.business.findUnique({ where: { subdomain: input.subdomain.trim().toLowerCase() } });
+  const business = await withSuperAdmin((tx) =>
+    tx.business.findUnique({ where: { subdomain: input.subdomain.trim().toLowerCase() } })
+  );
   if (!business) return { success: false, error: "Negocio no encontrado" };
 
   const clientParsed = ClientSchema.safeParse(input.client);
@@ -331,72 +349,80 @@ export async function createPublicAppointment(input: PublicBookingInput): Promis
     return { success: false, error: "Elige un especialista" };
   }
 
-  const [specialist, service] = await Promise.all([
-    input.specialistId
-      ? prisma.specialist.findFirst({ where: { id: input.specialistId, businessId: business.id, active: true } })
-      : null,
-    prisma.service.findFirst({ where: { id: input.serviceId, businessId: business.id, active: true } }),
-  ]);
-  if (!businessAssigns && !specialist) return { success: false, error: "Especialista no válido" };
-  if (!service) return { success: false, error: "Servicio no válido" };
+  const result = await withTenant(
+    business.id,
+    async (tx): Promise<{ ok: false; error: string } | { ok: true; cancelToken: string }> => {
+      const [specialist, service] = await Promise.all([
+        input.specialistId
+          ? tx.specialist.findFirst({ where: { id: input.specialistId, businessId: business.id, active: true } })
+          : null,
+        tx.service.findFirst({ where: { id: input.serviceId, businessId: business.id, active: true } }),
+      ]);
+      if (!businessAssigns && !specialist) return { ok: false, error: "Especialista no válido" };
+      if (!service) return { ok: false, error: "Servicio no válido" };
 
-  const startsAt = zonedTimeToUtc(input.dateKey, input.time);
-  if (Number.isNaN(startsAt.getTime()) || startsAt < new Date()) {
-    return { success: false, error: "Elige una fecha y hora válidas" };
-  }
-  const endsAt = new Date(startsAt.getTime() + service.durationMinutes * 60_000);
+      const startsAt = zonedTimeToUtc(input.dateKey, input.time);
+      if (Number.isNaN(startsAt.getTime()) || startsAt < new Date()) {
+        return { ok: false, error: "Elige una fecha y hora válidas" };
+      }
+      const endsAt = new Date(startsAt.getTime() + service.durationMinutes * 60_000);
 
-  if (specialist) {
-    const conflict = await prisma.appointment.findFirst({
-      where: {
-        specialistId: specialist.id,
-        status: { notIn: ["CANCELLED", "NO_SHOW"] },
-        startsAt: { lt: endsAt },
-        endsAt: { gt: startsAt },
-      },
-    });
-    if (conflict) return { success: false, error: "Ese horario ya no está disponible, elige otro" };
-  } else {
-    // No fixed specialist yet — re-check the shared pool the same way
-    // getAvailableSlotsAnySpecialist does, so a slot that filled up between
-    // the widget loading and this submit gets rejected instead of silently
-    // over-booking the business's real capacity.
-    const stillAvailable = (await getAvailableSlotsAnySpecialist(business.id, service.id, input.dateKey)).includes(
-      zonedHM(startsAt),
-    );
-    if (!stillAvailable) return { success: false, error: "Ese horario ya no está disponible, elige otro" };
-  }
+      if (specialist) {
+        const conflict = await tx.appointment.findFirst({
+          where: {
+            specialistId: specialist.id,
+            status: { notIn: ["CANCELLED", "NO_SHOW"] },
+            startsAt: { lt: endsAt },
+            endsAt: { gt: startsAt },
+          },
+        });
+        if (conflict) return { ok: false, error: "Ese horario ya no está disponible, elige otro" };
+      } else {
+        // No fixed specialist yet — re-check the shared pool the same way
+        // getAvailableSlotsAnySpecialist does, so a slot that filled up between
+        // the widget loading and this submit gets rejected instead of silently
+        // over-booking the business's real capacity. Runs as its own tenant
+        // transaction (same businessId), which is fine nested here.
+        const stillAvailable = (await getAvailableSlotsAnySpecialist(business.id, service.id, input.dateKey)).includes(
+          zonedHM(startsAt),
+        );
+        if (!stillAvailable) return { ok: false, error: "Ese horario ya no está disponible, elige otro" };
+      }
 
-  const existingClient = await prisma.client.findUnique({
-    where: { businessId_phone: { businessId: business.id, phone: clientParsed.data.phone } },
-  });
-  const clientId =
-    existingClient?.id ??
-    (
-      await prisma.client.create({
+      const existingClient = await tx.client.findUnique({
+        where: { businessId_phone: { businessId: business.id, phone: clientParsed.data.phone } },
+      });
+      const clientId =
+        existingClient?.id ??
+        (
+          await tx.client.create({
+            data: {
+              businessId: business.id,
+              firstName: clientParsed.data.firstName,
+              lastName: clientParsed.data.lastName,
+              phone: clientParsed.data.phone,
+              email: clientParsed.data.email || null,
+            },
+          })
+        ).id;
+
+      const created = await tx.appointment.create({
         data: {
           businessId: business.id,
-          firstName: clientParsed.data.firstName,
-          lastName: clientParsed.data.lastName,
-          phone: clientParsed.data.phone,
-          email: clientParsed.data.email || null,
+          clientId,
+          specialistId: specialist?.id ?? null,
+          serviceId: service.id,
+          startsAt,
+          endsAt,
         },
-      })
-    ).id;
-
-  const created = await prisma.appointment.create({
-    data: {
-      businessId: business.id,
-      clientId,
-      specialistId: specialist?.id ?? null,
-      serviceId: service.id,
-      startsAt,
-      endsAt,
+        select: { cancelToken: true },
+      });
+      return { ok: true, cancelToken: created.cancelToken };
     },
-    select: { cancelToken: true },
-  });
+  );
 
-  return { success: true, cancelToken: created.cancelToken };
+  if (!result.ok) return { success: false, error: result.error };
+  return { success: true, cancelToken: result.cancelToken };
 }
 
 export type PublicAppointmentInfo = {
@@ -411,29 +437,36 @@ export type PublicAppointmentInfo = {
 // Powers the public /cancel/[token] page — no session/businessId scoping,
 // the unguessable token itself is the authorization (see Appointment.cancelToken).
 export async function getAppointmentByCancelToken(token: string): Promise<PublicAppointmentInfo | null> {
-  return prisma.appointment.findUnique({
-    where: { cancelToken: token },
-    select: {
-      id: true,
-      startsAt: true,
-      status: true,
-      business: { select: { name: true, logoDataUrl: true, brandColor: true, brandBackground: true } },
-      service: { select: { name: true } },
-      client: { select: { firstName: true } },
-    },
-  });
+  return withSuperAdmin((tx) =>
+    tx.appointment.findUnique({
+      where: { cancelToken: token },
+      select: {
+        id: true,
+        startsAt: true,
+        status: true,
+        business: { select: { name: true, logoDataUrl: true, brandColor: true, brandBackground: true } },
+        service: { select: { name: true } },
+        client: { select: { firstName: true } },
+      },
+    })
+  );
 }
 
 export async function cancelAppointmentByToken(token: string): Promise<ActionResult> {
-  const appointment = await prisma.appointment.findUnique({
-    where: { cancelToken: token },
-    select: { id: true, status: true },
-  });
-  if (!appointment) return { success: false, error: "Enlace inválido" };
-  if (appointment.status === "CANCELLED") return { success: false, error: "Esta cita ya fue cancelada" };
-  if (appointment.status === "ATTENDED") return { success: false, error: "Esta cita ya fue atendida" };
+  const result = await withSuperAdmin(async (tx) => {
+    const appointment = await tx.appointment.findUnique({
+      where: { cancelToken: token },
+      select: { id: true, status: true },
+    });
+    if (!appointment) return { error: "Enlace inválido" };
+    if (appointment.status === "CANCELLED") return { error: "Esta cita ya fue cancelada" };
+    if (appointment.status === "ATTENDED") return { error: "Esta cita ya fue atendida" };
 
-  await prisma.appointment.update({ where: { id: appointment.id }, data: { status: "CANCELLED" } });
+    await tx.appointment.update({ where: { id: appointment.id }, data: { status: "CANCELLED" } });
+    return { error: null };
+  });
+  if (result.error) return { success: false, error: result.error };
+
   revalidatePath("/agenda");
   return { success: true };
 }

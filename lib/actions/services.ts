@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { prisma } from "@/lib/prisma";
+import { withTenant } from "@/lib/tenant-db";
 import { requireOwner, requireSession } from "@/lib/session";
 import { ServiceHoursSchema, ServiceSchema } from "@/lib/validations";
 import type { ActionResult } from "@/lib/types";
@@ -20,25 +20,29 @@ export type ServiceListItem = {
 
 export async function listServices(): Promise<ServiceListItem[]> {
   const { businessId } = await requireOwner();
-  return prisma.service.findMany({
-    where: { businessId },
-    orderBy: [{ active: "desc" }, { name: "asc" }],
-  });
+  return withTenant(businessId, (tx) =>
+    tx.service.findMany({
+      where: { businessId },
+      orderBy: [{ active: "desc" }, { name: "asc" }],
+    })
+  );
 }
 
 export async function getService(serviceId: string): Promise<ServiceListItem | null> {
   const { businessId } = await requireOwner();
-  return prisma.service.findFirst({ where: { id: serviceId, businessId } });
+  return withTenant(businessId, (tx) => tx.service.findFirst({ where: { id: serviceId, businessId } }));
 }
 
 // Used by the booking flow (any signed-in role) — only active services can
 // be picked when scheduling an appointment.
 export async function listActiveServices(): Promise<ServiceListItem[]> {
   const { businessId } = await requireSession();
-  return prisma.service.findMany({
-    where: { businessId, active: true },
-    orderBy: { name: "asc" },
-  });
+  return withTenant(businessId, (tx) =>
+    tx.service.findMany({
+      where: { businessId, active: true },
+      orderBy: { name: "asc" },
+    })
+  );
 }
 
 function parseServiceForm(formData: FormData) {
@@ -60,17 +64,19 @@ export async function createService(formData: FormData): Promise<ActionResult> {
     return { success: false, error: parsed.error.issues[0]?.message ?? "Datos inválidos" };
   }
 
-  await prisma.service.create({
-    data: {
-      businessId,
-      name: parsed.data.name,
-      description: parsed.data.description || null,
-      durationMinutes: parsed.data.durationMinutes,
-      basePriceCents: Math.round(parsed.data.basePrice * 100),
-      priceCurrencyCode: parsed.data.priceCurrencyCode,
-      category: parsed.data.category || null,
-    },
-  });
+  await withTenant(businessId, (tx) =>
+    tx.service.create({
+      data: {
+        businessId,
+        name: parsed.data.name,
+        description: parsed.data.description || null,
+        durationMinutes: parsed.data.durationMinutes,
+        basePriceCents: Math.round(parsed.data.basePrice * 100),
+        priceCurrencyCode: parsed.data.priceCurrencyCode,
+        category: parsed.data.category || null,
+      },
+    })
+  );
 
   revalidatePath("/services");
   return { success: true };
@@ -84,17 +90,19 @@ export async function updateService(serviceId: string, formData: FormData): Prom
     return { success: false, error: parsed.error.issues[0]?.message ?? "Datos inválidos" };
   }
 
-  const { count } = await prisma.service.updateMany({
-    where: { id: serviceId, businessId },
-    data: {
-      name: parsed.data.name,
-      description: parsed.data.description || null,
-      durationMinutes: parsed.data.durationMinutes,
-      basePriceCents: Math.round(parsed.data.basePrice * 100),
-      priceCurrencyCode: parsed.data.priceCurrencyCode,
-      category: parsed.data.category || null,
-    },
-  });
+  const { count } = await withTenant(businessId, (tx) =>
+    tx.service.updateMany({
+      where: { id: serviceId, businessId },
+      data: {
+        name: parsed.data.name,
+        description: parsed.data.description || null,
+        durationMinutes: parsed.data.durationMinutes,
+        basePriceCents: Math.round(parsed.data.basePrice * 100),
+        priceCurrencyCode: parsed.data.priceCurrencyCode,
+        category: parsed.data.category || null,
+      },
+    })
+  );
   if (count === 0) return { success: false, error: "Servicio no encontrado" };
 
   revalidatePath("/services");
@@ -104,10 +112,12 @@ export async function updateService(serviceId: string, formData: FormData): Prom
 export async function toggleServiceActive(serviceId: string, active: boolean): Promise<ActionResult> {
   const { businessId } = await requireOwner();
 
-  const { count } = await prisma.service.updateMany({
-    where: { id: serviceId, businessId },
-    data: { active },
-  });
+  const { count } = await withTenant(businessId, (tx) =>
+    tx.service.updateMany({
+      where: { id: serviceId, businessId },
+      data: { active },
+    })
+  );
   if (count === 0) return { success: false, error: "Servicio no encontrado" };
 
   revalidatePath("/services");
@@ -124,20 +134,22 @@ export async function toggleServiceActive(serviceId: string, active: boolean): P
 export async function deleteService(serviceId: string): Promise<ActionResult> {
   const { businessId } = await requireOwner();
 
-  const service = await prisma.service.findFirst({ where: { id: serviceId, businessId } });
-  if (!service) return { success: false, error: "Servicio no encontrado" };
+  const found = await withTenant(businessId, async (tx) => {
+    const service = await tx.service.findFirst({ where: { id: serviceId, businessId } });
+    if (!service) return false;
 
-  await prisma.$transaction([
-    prisma.transaction.deleteMany({
+    await tx.transaction.deleteMany({
       where: { OR: [{ appointment: { serviceId } }, { sessionPackage: { serviceId } }] },
-    }),
-    prisma.notification.deleteMany({ where: { appointment: { serviceId } } }),
-    prisma.appointment.deleteMany({ where: { serviceId } }),
-    prisma.sessionPackage.deleteMany({ where: { serviceId } }),
-    prisma.specialistService.deleteMany({ where: { serviceId } }),
-    prisma.serviceHour.deleteMany({ where: { serviceId } }),
-    prisma.service.delete({ where: { id: serviceId } }),
-  ]);
+    });
+    await tx.notification.deleteMany({ where: { appointment: { serviceId } } });
+    await tx.appointment.deleteMany({ where: { serviceId } });
+    await tx.sessionPackage.deleteMany({ where: { serviceId } });
+    await tx.specialistService.deleteMany({ where: { serviceId } });
+    await tx.serviceHour.deleteMany({ where: { serviceId } });
+    await tx.service.delete({ where: { id: serviceId } });
+    return true;
+  });
+  if (!found) return { success: false, error: "Servicio no encontrado" };
 
   revalidatePath("/services");
   revalidatePath("/agenda");
@@ -169,38 +181,40 @@ export async function bulkImportServices(rows: BulkServiceRow[]): Promise<BulkSe
   let updated = 0;
   const failed: { row: number; error: string }[] = [];
 
-  for (let i = 0; i < rows.length; i++) {
-    const parsed = ServiceSchema.safeParse(rows[i]);
-    if (!parsed.success) {
-      failed.push({ row: i + 1, error: parsed.error.issues[0]?.message ?? "Datos inválidos" });
-      continue;
-    }
-
-    try {
-      const existing = await prisma.service.findFirst({
-        where: { businessId, name: { equals: parsed.data.name, mode: "insensitive" } },
-      });
-
-      const data = {
-        name: parsed.data.name,
-        description: parsed.data.description || null,
-        durationMinutes: parsed.data.durationMinutes,
-        basePriceCents: Math.round(parsed.data.basePrice * 100),
-        priceCurrencyCode: parsed.data.priceCurrencyCode,
-        category: parsed.data.category || null,
-      };
-
-      if (existing) {
-        await prisma.service.update({ where: { id: existing.id }, data });
-        updated++;
-      } else {
-        await prisma.service.create({ data: { ...data, businessId } });
-        created++;
+  await withTenant(businessId, async (tx) => {
+    for (let i = 0; i < rows.length; i++) {
+      const parsed = ServiceSchema.safeParse(rows[i]);
+      if (!parsed.success) {
+        failed.push({ row: i + 1, error: parsed.error.issues[0]?.message ?? "Datos inválidos" });
+        continue;
       }
-    } catch {
-      failed.push({ row: i + 1, error: "No se pudo guardar" });
+
+      try {
+        const existing = await tx.service.findFirst({
+          where: { businessId, name: { equals: parsed.data.name, mode: "insensitive" } },
+        });
+
+        const data = {
+          name: parsed.data.name,
+          description: parsed.data.description || null,
+          durationMinutes: parsed.data.durationMinutes,
+          basePriceCents: Math.round(parsed.data.basePrice * 100),
+          priceCurrencyCode: parsed.data.priceCurrencyCode,
+          category: parsed.data.category || null,
+        };
+
+        if (existing) {
+          await tx.service.update({ where: { id: existing.id }, data });
+          updated++;
+        } else {
+          await tx.service.create({ data: { ...data, businessId } });
+          created++;
+        }
+      } catch {
+        failed.push({ row: i + 1, error: "No se pudo guardar" });
+      }
     }
-  }
+  });
 
   revalidatePath("/services");
   return { created, updated, failed };
@@ -221,13 +235,15 @@ export async function getServiceHours(
   serviceId: string,
 ): Promise<{ hasCustomHours: boolean; hours: ServiceHourItem[] } | null> {
   const { businessId } = await requireOwner();
-  const [service, businessHours] = await Promise.all([
-    prisma.service.findFirst({
-      where: { id: serviceId, businessId },
-      select: { hasCustomHours: true, hours: true },
-    }),
-    prisma.businessHour.findMany({ where: { businessId } }),
-  ]);
+  const [service, businessHours] = await withTenant(businessId, (tx) =>
+    Promise.all([
+      tx.service.findFirst({
+        where: { id: serviceId, businessId },
+        select: { hasCustomHours: true, hours: true },
+      }),
+      tx.businessHour.findMany({ where: { businessId } }),
+    ])
+  );
   if (!service) return null;
 
   const byWeekday = new Map(service.hours.map((h) => [h.weekday, h]));
@@ -276,13 +292,13 @@ export async function updateServiceHours(
     return { success: false, error: parsed.error.issues[0]?.message ?? "Horario inválido" };
   }
 
-  const service = await prisma.service.findFirst({ where: { id: serviceId, businessId } });
-  if (!service) return { success: false, error: "Servicio no encontrado" };
+  const found = await withTenant(businessId, async (tx) => {
+    const service = await tx.service.findFirst({ where: { id: serviceId, businessId } });
+    if (!service) return false;
 
-  await prisma.$transaction([
-    prisma.service.update({ where: { id: serviceId }, data: { hasCustomHours: parsed.data.hasCustomHours } }),
-    ...parsed.data.hours.map((h) =>
-      prisma.serviceHour.upsert({
+    await tx.service.update({ where: { id: serviceId }, data: { hasCustomHours: parsed.data.hasCustomHours } });
+    for (const h of parsed.data.hours) {
+      await tx.serviceHour.upsert({
         where: { serviceId_weekday: { serviceId, weekday: h.weekday } },
         create: {
           serviceId,
@@ -300,9 +316,11 @@ export async function updateServiceHours(
           breakStart: h.isClosed ? null : h.breakStart || null,
           breakEnd: h.isClosed ? null : h.breakEnd || null,
         },
-      }),
-    ),
-  ]);
+      });
+    }
+    return true;
+  });
+  if (!found) return { success: false, error: "Servicio no encontrado" };
 
   revalidatePath(`/services/${serviceId}`);
   revalidatePath("/services");

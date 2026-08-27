@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { withTenant } from "@/lib/tenant-db";
 import { requireSession } from "@/lib/session";
+import { notifyLive, agendaChannel } from "@/lib/realtime";
 import { zonedTimeToUtc } from "@/lib/timezone";
 import { getAvailableSlots, getAvailableSlotsAnySpecialist } from "@/lib/actions/public";
 import type { ActionResult } from "@/lib/types";
@@ -163,6 +164,7 @@ export async function createAppointment(input: CreateAppointmentInput): Promise<
   if (result.error) return { success: false, error: result.error };
 
   revalidatePath("/agenda");
+  void notifyLive(agendaChannel(businessId), "appointment");
   return { success: true };
 }
 
@@ -205,6 +207,7 @@ export async function assignSpecialist(appointmentId: string, specialistId: stri
   if (result.error) return { success: false, error: result.error };
 
   revalidatePath("/agenda");
+  void notifyLive(agendaChannel(businessId), "appointment");
   return { success: true };
 }
 
@@ -223,6 +226,7 @@ export async function updateAppointmentStatus(
   if (count === 0) return { success: false, error: "Cita no encontrada" };
 
   revalidatePath("/agenda");
+  void notifyLive(agendaChannel(businessId), "appointment");
   return { success: true };
 }
 

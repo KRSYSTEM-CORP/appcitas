@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import type { Prisma } from "@prisma/client";
 import { withTenant, withSuperAdmin } from "@/lib/tenant-db";
 import { ClientSchema } from "@/lib/validations";
+import { notifyLive, agendaChannel } from "@/lib/realtime";
 import { zonedTimeToUtc, zonedMidnightUtc, zonedHM, weekdayOf } from "@/lib/timezone";
 import type { ActionResult } from "@/lib/types";
 import type { AppointmentStatus, SpecialistAssignmentMode } from "@prisma/client";
@@ -422,6 +423,7 @@ export async function createPublicAppointment(input: PublicBookingInput): Promis
   );
 
   if (!result.ok) return { success: false, error: result.error };
+  void notifyLive(agendaChannel(business.id), "appointment");
   return { success: true, cancelToken: result.cancelToken };
 }
 
@@ -456,17 +458,18 @@ export async function cancelAppointmentByToken(token: string): Promise<ActionRes
   const result = await withSuperAdmin(async (tx) => {
     const appointment = await tx.appointment.findUnique({
       where: { cancelToken: token },
-      select: { id: true, status: true },
+      select: { id: true, status: true, businessId: true },
     });
-    if (!appointment) return { error: "Enlace inválido" };
-    if (appointment.status === "CANCELLED") return { error: "Esta cita ya fue cancelada" };
-    if (appointment.status === "ATTENDED") return { error: "Esta cita ya fue atendida" };
+    if (!appointment) return { error: "Enlace inválido", businessId: null };
+    if (appointment.status === "CANCELLED") return { error: "Esta cita ya fue cancelada", businessId: null };
+    if (appointment.status === "ATTENDED") return { error: "Esta cita ya fue atendida", businessId: null };
 
     await tx.appointment.update({ where: { id: appointment.id }, data: { status: "CANCELLED" } });
-    return { error: null };
+    return { error: null, businessId: appointment.businessId };
   });
   if (result.error) return { success: false, error: result.error };
 
   revalidatePath("/agenda");
+  if (result.businessId) void notifyLive(agendaChannel(result.businessId), "appointment");
   return { success: true };
 }

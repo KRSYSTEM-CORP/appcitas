@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { buttonVariants } from "@/components/ui/button";
 import { AppointmentCard } from "@/components/agenda/AppointmentCard";
+import { AgendaLiveRefresh } from "@/components/agenda/AgendaLiveRefresh";
 import { DayTimeline } from "@/components/agenda/DayTimeline";
 import { listAppointmentsInRange } from "@/lib/actions/appointments";
 import { listActiveSpecialists } from "@/lib/actions/specialists";
@@ -50,6 +51,7 @@ export default async function AgendaPage({
 
   return (
     <div className="flex flex-col gap-4 p-6 w-full">
+      <AgendaLiveRefresh businessId={session.businessId} />
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-semibold">Agenda de {session.businessName}</h1>

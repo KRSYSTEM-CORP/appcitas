@@ -65,6 +65,7 @@ export async function listPackages(range?: { start: Date; end: Date }): Promise<
         transactions: { select: TRANSACTION_SELECT, orderBy: { paidAt: "asc" } },
       },
       orderBy: { createdAt: "desc" },
+      take: 200,
     })
   );
 

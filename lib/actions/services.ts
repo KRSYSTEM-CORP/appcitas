@@ -24,6 +24,7 @@ export async function listServices(): Promise<ServiceListItem[]> {
     tx.service.findMany({
       where: { businessId },
       orderBy: [{ active: "desc" }, { name: "asc" }],
+      take: 200,
     })
   );
 }
@@ -41,6 +42,7 @@ export async function listActiveServices(): Promise<ServiceListItem[]> {
     tx.service.findMany({
       where: { businessId, active: true },
       orderBy: { name: "asc" },
+      take: 200,
     })
   );
 }

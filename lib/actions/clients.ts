@@ -25,6 +25,7 @@ export async function listClients(): Promise<ClientListItem[]> {
     tx.client.findMany({
       where: { businessId, active: true },
       orderBy: [{ firstName: "asc" }, { lastName: "asc" }],
+      take: 200,
     })
   );
 }

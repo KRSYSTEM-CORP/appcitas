@@ -262,6 +262,7 @@ export async function listPendingPaymentReports() {
       where: { status: "PENDING" },
       orderBy: { createdAt: "asc" },
       include: { business: { select: { name: true } }, lines: true },
+      take: 200,
     })
   );
 }

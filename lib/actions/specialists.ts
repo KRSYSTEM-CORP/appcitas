@@ -40,6 +40,7 @@ export async function listSpecialists(): Promise<SpecialistListItem[]> {
       where: { businessId },
       include: { services: { select: { serviceId: true } } },
       orderBy: [{ active: "desc" }, { displayName: "asc" }],
+      take: 200,
     })
   );
   return specialists.map(toListItem);
@@ -55,6 +56,7 @@ export async function listActiveSpecialists(): Promise<SpecialistListItem[]> {
       where: { businessId, active: true },
       include: { services: { select: { serviceId: true } } },
       orderBy: { displayName: "asc" },
+      take: 200,
     })
   );
   return specialists.map(toListItem);

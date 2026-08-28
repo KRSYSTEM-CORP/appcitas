@@ -73,6 +73,7 @@ export async function listMyPaymentReports() {
       where: { businessId },
       orderBy: { createdAt: "desc" },
       include: { lines: true },
+      take: 200,
     })
   );
 }

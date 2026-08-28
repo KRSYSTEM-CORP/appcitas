@@ -43,15 +43,6 @@ function getPeriodRange(period: ReportPeriod, now: Date): { start: Date; end: Da
   return { start: new Date(now.getFullYear(), now.getMonth(), 1), end: null };
 }
 
-// A payment can be recorded against a single Appointment OR against a whole
-// Package (packageId, appointmentId null — see prisma/schema.prisma's
-// Transaction model). Filtering by `appointment: { businessId }` alone
-// silently excludes package-level payments, which used to make them
-// invisible in every revenue figure below.
-function transactionBusinessFilter(businessId: string) {
-  return { OR: [{ appointment: { businessId } }, { sessionPackage: { businessId } }] };
-}
-
 export async function getReportsSummary(period: ReportPeriod = "month"): Promise<ReportsSummary> {
   const { businessId } = await requireOwner();
 
@@ -75,7 +66,7 @@ export async function getReportsSummary(period: ReportPeriod = "month"): Promise
   ] = await Promise.all([
     tx.business.findUniqueOrThrow({ where: { id: businessId }, select: { localCurrencyCode: true } }),
     tx.transaction.findMany({
-      where: { ...transactionBusinessFilter(businessId), paidAt: periodPaidAtFilter },
+      where: { businessId, paidAt: periodPaidAtFilter },
       select: { paidCurrencyCode: true, amountLocalCents: true, amountForeignCents: true, currencyForeign: true },
     }),
     tx.appointment.count({ where: { businessId, startsAt: { gte: todayStart, lt: todayEnd } } }),
@@ -95,7 +86,7 @@ export async function getReportsSummary(period: ReportPeriod = "month"): Promise
       select: { id: true, firstName: true, lastName: true, phone: true },
     }),
     tx.transaction.findMany({
-      where: { ...transactionBusinessFilter(businessId), paidAt: { gte: chartStart } },
+      where: { businessId, paidAt: { gte: chartStart } },
       select: { amountLocalCents: true, paidAt: true },
     }),
   ]);

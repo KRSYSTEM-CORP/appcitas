@@ -68,6 +68,7 @@ export async function recordPayments(
         line.currency === "FOREIGN" ? enteredCents : useFx ? Math.round(enteredCents / rate!) : null;
 
       return {
+        businessId,
         ...("appointmentId" in target ? { appointmentId: target.appointmentId } : { packageId: target.packageId }),
         amountLocalCents,
         amountForeignCents,

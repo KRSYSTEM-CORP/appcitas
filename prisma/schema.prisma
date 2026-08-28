@@ -136,6 +136,7 @@ model Business {
   appointments     Appointment[]
   packages         SessionPackage[]
   businessHours    BusinessHour[]
+  transactions     Transaction[]
   payments         Payment[]
   paymentReports   PaymentReport[]
   binancePayOrders BinancePayOrder[]
@@ -347,6 +348,7 @@ model Client {
   packages     SessionPackage[]
 
   @@unique([businessId, phone])
+  @@index([businessId, active])
 }
 
 // A prepaid or tracked set of sessions for the same client+service — e.g. 6
@@ -428,6 +430,14 @@ model Appointment {
 // single record — "fully paid" is derived by summing these, not stored.
 model Transaction {
   id                 String          @id @default(cuid())
+  // Denormalized from appointment.businessId/sessionPackage.businessId (see
+  // transactionBusinessFilter in lib/actions/reports.ts) — a Transaction
+  // hangs off EITHER an Appointment OR a Package, and without this column
+  // every tenant-scoped read had to go through a join to find out which.
+  // Populated at creation time (lib/actions/payments.ts); both FKs it's
+  // derived from are immutable once set, so it never needs to be re-synced.
+  businessId         String
+  business           Business        @relation(fields: [businessId], references: [id], onDelete: Cascade)
   appointmentId      String?
   appointment        Appointment?    @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
   packageId          String?
@@ -449,6 +459,7 @@ model Transaction {
   reference          String?
   paidAt             DateTime        @default(now())
 
+  @@index([businessId, paidAt])
   @@index([appointmentId])
   @@index([packageId])
 }

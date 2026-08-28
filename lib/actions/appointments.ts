@@ -5,7 +5,7 @@ import { withTenant } from "@/lib/tenant-db";
 import { requireSession } from "@/lib/session";
 import { notifyLive, agendaChannel } from "@/lib/realtime";
 import { zonedTimeToUtc } from "@/lib/timezone";
-import { getAvailableSlots, getAvailableSlotsAnySpecialist } from "@/lib/actions/public";
+import { computeAvailableSlots, computeAvailableSlotsAnySpecialist } from "@/lib/actions/public";
 import type { ActionResult } from "@/lib/types";
 import type { AppointmentStatus, PackagePaymentMode, PaymentMethod } from "@prisma/client";
 
@@ -245,6 +245,6 @@ export async function getAvailableSlotsForStaff(
 ): Promise<string[]> {
   const { businessId } = await requireSession();
   return specialistId
-    ? getAvailableSlots(businessId, specialistId, serviceId, dateKey)
-    : getAvailableSlotsAnySpecialist(businessId, serviceId, dateKey);
+    ? computeAvailableSlots(businessId, specialistId, serviceId, dateKey)
+    : computeAvailableSlotsAnySpecialist(businessId, serviceId, dateKey);
 }

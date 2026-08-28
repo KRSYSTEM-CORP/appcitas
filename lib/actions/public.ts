@@ -5,6 +5,8 @@ import type { Prisma } from "@prisma/client";
 import { withTenant, withSuperAdmin } from "@/lib/tenant-db";
 import { ClientSchema } from "@/lib/validations";
 import { notifyLive, agendaChannel } from "@/lib/realtime";
+import { checkRateLimit, recordFailedAttempt, rateLimitMessage } from "@/lib/rate-limit";
+import { getClientIp } from "@/lib/request-ip";
 import { zonedTimeToUtc, zonedMidnightUtc, zonedHM, weekdayOf } from "@/lib/timezone";
 import type { ActionResult } from "@/lib/types";
 import type { AppointmentStatus, SpecialistAssignmentMode } from "@prisma/client";
@@ -216,7 +218,26 @@ function generateSlots(
 // by a non-cancelled appointment of theirs, minus their own hours (if they
 // have a custom schedule) and anything already in the past if dateKey is
 // today.
+// Rate-limited only at the boundary that's actually reachable by an
+// anonymous stranger (the public widget) — the staff-facing counterpart in
+// appointments.ts and the internal re-check inside createPublicAppointment
+// both call computeAvailableSlots directly, since throttling those by IP
+// would either punish a whole office behind one NAT'd address or eat into
+// the same budget as the booking submission it's validating.
 export async function getAvailableSlots(
+  businessId: string,
+  specialistId: string,
+  serviceId: string,
+  dateKey: string,
+): Promise<string[]> {
+  const ip = await getClientIp();
+  const rl = await checkRateLimit("public-slots", ip, 30, 60_000);
+  if (!rl.allowed) return [];
+  await recordFailedAttempt("public-slots", ip);
+  return computeAvailableSlots(businessId, specialistId, serviceId, dateKey);
+}
+
+export async function computeAvailableSlots(
   businessId: string,
   specialistId: string,
   serviceId: string,
@@ -266,6 +287,18 @@ export async function getAvailableSlots(
 // business's own not-yet-assigned appointments for this same service
 // claiming that time from the shared pool.
 export async function getAvailableSlotsAnySpecialist(
+  businessId: string,
+  serviceId: string,
+  dateKey: string,
+): Promise<string[]> {
+  const ip = await getClientIp();
+  const rl = await checkRateLimit("public-slots", ip, 30, 60_000);
+  if (!rl.allowed) return [];
+  await recordFailedAttempt("public-slots", ip);
+  return computeAvailableSlotsAnySpecialist(businessId, serviceId, dateKey);
+}
+
+export async function computeAvailableSlotsAnySpecialist(
   businessId: string,
   serviceId: string,
   dateKey: string,
@@ -335,6 +368,11 @@ export type PublicBookingInput = {
 export type CreatePublicAppointmentResult = { success: true; cancelToken: string } | { success: false; error: string };
 
 export async function createPublicAppointment(input: PublicBookingInput): Promise<CreatePublicAppointmentResult> {
+  const ip = await getClientIp();
+  const rl = await checkRateLimit("public-appointment", ip, 5, 10 * 60_000);
+  if (!rl.allowed) return { success: false, error: rateLimitMessage(rl.retryAfterMinutes) };
+  await recordFailedAttempt("public-appointment", ip);
+
   const business = await withSuperAdmin((tx) =>
     tx.business.findUnique({ where: { subdomain: input.subdomain.trim().toLowerCase() } })
   );
@@ -384,7 +422,7 @@ export async function createPublicAppointment(input: PublicBookingInput): Promis
         // the widget loading and this submit gets rejected instead of silently
         // over-booking the business's real capacity. Runs as its own tenant
         // transaction (same businessId), which is fine nested here.
-        const stillAvailable = (await getAvailableSlotsAnySpecialist(business.id, service.id, input.dateKey)).includes(
+        const stillAvailable = (await computeAvailableSlotsAnySpecialist(business.id, service.id, input.dateKey)).includes(
           zonedHM(startsAt),
         );
         if (!stillAvailable) return { ok: false, error: "Ese horario ya no está disponible, elige otro" };
@@ -455,6 +493,11 @@ export async function getAppointmentByCancelToken(token: string): Promise<Public
 }
 
 export async function cancelAppointmentByToken(token: string): Promise<ActionResult> {
+  const ip = await getClientIp();
+  const rl = await checkRateLimit("public-cancel", ip, 10, 60 * 60_000);
+  if (!rl.allowed) return { success: false, error: rateLimitMessage(rl.retryAfterMinutes) };
+  await recordFailedAttempt("public-cancel", ip);
+
   const result = await withSuperAdmin(async (tx) => {
     const appointment = await tx.appointment.findUnique({
       where: { cancelToken: token },

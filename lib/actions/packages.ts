@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { withTenant } from "@/lib/tenant-db";
 import { requireSession } from "@/lib/session";
 import { dateKeyOf, zonedHM, zonedTimeToUtc } from "@/lib/timezone";
-import { getAvailableSlots } from "@/lib/actions/public";
+import { computeAvailableSlots } from "@/lib/actions/public";
 import { formatDayLabel } from "@/lib/format";
 import type { ActionResult } from "@/lib/types";
 import type { AppointmentStatus, PackagePaymentMode, PaymentMethod, Prisma } from "@prisma/client";
@@ -228,7 +228,7 @@ export async function createPackage(input: CreatePackageInput): Promise<ActionRe
   // the withTenant block below rather than nesting inside it.
   for (const session of sessions) {
     const sessionDateKey = dateKeyOf(session.startsAt);
-    const slots = await getAvailableSlots(businessId, specialist.id, service.id, sessionDateKey);
+    const slots = await computeAvailableSlots(businessId, specialist.id, service.id, sessionDateKey);
     if (!slots.includes(zonedHM(session.startsAt))) {
       return {
         success: false,

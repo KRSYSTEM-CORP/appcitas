@@ -7,6 +7,7 @@ import { ClientSchema } from "@/lib/validations";
 import { notifyLive, agendaChannel } from "@/lib/realtime";
 import { checkRateLimit, recordFailedAttempt, rateLimitMessage } from "@/lib/rate-limit";
 import { getClientIp } from "@/lib/request-ip";
+import { getOrSetCache } from "@/lib/cache";
 import { zonedTimeToUtc, zonedMidnightUtc, zonedHM, weekdayOf } from "@/lib/timezone";
 import type { ActionResult } from "@/lib/types";
 import type { AppointmentStatus, SpecialistAssignmentMode } from "@prisma/client";
@@ -35,28 +36,35 @@ export type PublicBusiness = {
 };
 
 export async function getPublicBusiness(subdomain: string): Promise<PublicBusiness | null> {
-  const business = await withSuperAdmin((tx) =>
-    tx.business.findUnique({
-      where: { subdomain: subdomain.trim().toLowerCase() },
-      select: {
-        id: true,
-        name: true,
-        subdomain: true,
-        logoDataUrl: true,
-        brandColor: true,
-        brandBackground: true,
-        localCurrencyCode: true,
-        fxEnabled: true,
-        foreignCurrencyCode: true,
-        exchangeRate: true,
-        specialistAssignmentMode: true,
-      },
-    })
-  );
-  if (!business) return null;
+  const normalized = subdomain.trim().toLowerCase();
+  // Hit on every /book/[subdomain] page load by anonymous visitors. No
+  // precise invalidation on business-settings updates — branding/currency
+  // edits are rare and this TTL is short enough that a stale read here is a
+  // minor, self-correcting cosmetic delay, not a correctness issue.
+  return getOrSetCache(`publicBusiness:${normalized}`, 300, async () => {
+    const business = await withSuperAdmin((tx) =>
+      tx.business.findUnique({
+        where: { subdomain: normalized },
+        select: {
+          id: true,
+          name: true,
+          subdomain: true,
+          logoDataUrl: true,
+          brandColor: true,
+          brandBackground: true,
+          localCurrencyCode: true,
+          fxEnabled: true,
+          foreignCurrencyCode: true,
+          exchangeRate: true,
+          specialistAssignmentMode: true,
+        },
+      })
+    );
+    if (!business) return null;
 
-  const { exchangeRate, ...rest } = business;
-  return { ...rest, rate: exchangeRate != null ? Number(exchangeRate) : null };
+    const { exchangeRate, ...rest } = business;
+    return { ...rest, rate: exchangeRate != null ? Number(exchangeRate) : null };
+  });
 }
 
 export type PublicService = {
@@ -80,45 +88,51 @@ export type PublicSpecialist = {
 export async function listPublicCatalog(
   businessId: string,
 ): Promise<{ services: PublicService[]; specialists: PublicSpecialist[] }> {
-  const [services, specialists] = await withTenant(businessId, (tx) =>
-    Promise.all([
-      tx.service.findMany({
-        where: { businessId, active: true },
-        select: {
-          id: true,
-          name: true,
-          description: true,
-          durationMinutes: true,
-          basePriceCents: true,
-          priceCurrencyCode: true,
-          category: true,
-        },
-        orderBy: { name: "asc" },
-      }),
-      tx.specialist.findMany({
-        where: { businessId, active: true },
-        select: {
-          id: true,
-          displayName: true,
-          bio: true,
-          avatarDataUrl: true,
-          services: { select: { serviceId: true } },
-        },
-        orderBy: { displayName: "asc" },
-      }),
-    ])
-  );
+  // Same page load as getPublicBusiness above. No precise invalidation on
+  // catalog edits, same reasoning — a manager editing services/specialists
+  // is rare relative to how often the widget is loaded, and a short TTL
+  // bounds the staleness to a minor cosmetic delay.
+  return getOrSetCache(`publicCatalog:${businessId}`, 180, async () => {
+    const [services, specialists] = await withTenant(businessId, (tx) =>
+      Promise.all([
+        tx.service.findMany({
+          where: { businessId, active: true },
+          select: {
+            id: true,
+            name: true,
+            description: true,
+            durationMinutes: true,
+            basePriceCents: true,
+            priceCurrencyCode: true,
+            category: true,
+          },
+          orderBy: { name: "asc" },
+        }),
+        tx.specialist.findMany({
+          where: { businessId, active: true },
+          select: {
+            id: true,
+            displayName: true,
+            bio: true,
+            avatarDataUrl: true,
+            services: { select: { serviceId: true } },
+          },
+          orderBy: { displayName: "asc" },
+        }),
+      ])
+    );
 
-  return {
-    services,
-    specialists: specialists.map((s) => ({
-      id: s.id,
-      displayName: s.displayName,
-      bio: s.bio,
-      avatarDataUrl: s.avatarDataUrl,
-      serviceIds: s.services.map((sv) => sv.serviceId),
-    })),
-  };
+    return {
+      services,
+      specialists: specialists.map((s) => ({
+        id: s.id,
+        displayName: s.displayName,
+        bio: s.bio,
+        avatarDataUrl: s.avatarDataUrl,
+        serviceIds: s.services.map((sv) => sv.serviceId),
+      })),
+    };
+  });
 }
 
 const SLOT_STEP_MINUTES = 30;
@@ -234,7 +248,16 @@ export async function getAvailableSlots(
   const rl = await checkRateLimit("public-slots", ip, 30, 60_000);
   if (!rl.allowed) return [];
   await recordFailedAttempt("public-slots", ip);
-  return computeAvailableSlots(businessId, specialistId, serviceId, dateKey);
+  // Cached only at this public, anonymous-facing entry point — never inside
+  // computeAvailableSlots itself, which the staff-facing scheduler
+  // (getAvailableSlotsForStaff) and createPublicAppointment's own live
+  // re-check both call directly and need fresh every time. A short TTL is
+  // safe here specifically because that re-check exists: a stale "available"
+  // slot can only ever produce a rejected booking attempt on retry, never an
+  // actual double-booking.
+  return getOrSetCache(`slots:${businessId}:${specialistId}:${serviceId}:${dateKey}`, 20, () =>
+    computeAvailableSlots(businessId, specialistId, serviceId, dateKey)
+  );
 }
 
 export async function computeAvailableSlots(
@@ -295,7 +318,12 @@ export async function getAvailableSlotsAnySpecialist(
   const rl = await checkRateLimit("public-slots", ip, 30, 60_000);
   if (!rl.allowed) return [];
   await recordFailedAttempt("public-slots", ip);
-  return computeAvailableSlotsAnySpecialist(businessId, serviceId, dateKey);
+  // Same reasoning as getAvailableSlots above — cached only here, never
+  // inside computeAvailableSlotsAnySpecialist, which stays live for the
+  // internal re-check inside createPublicAppointment.
+  return getOrSetCache(`slotsAny:${businessId}:${serviceId}:${dateKey}`, 20, () =>
+    computeAvailableSlotsAnySpecialist(businessId, serviceId, dateKey)
+  );
 }
 
 export async function computeAvailableSlotsAnySpecialist(

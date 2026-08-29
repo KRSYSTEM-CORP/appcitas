@@ -2,6 +2,7 @@ import "server-only";
 import { randomInt } from "crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { withSuperAdmin } from "@/lib/tenant-db";
 import { PLATFORM_SETTINGS_ID, TRIAL_DAYS, FALLBACK_MONTHLY_FEE_USD_CENTS } from "@/lib/billing";
 
 // Alta de un negocio nuevo con su horario por defecto y su dueño (OWNER). La
@@ -64,7 +65,10 @@ export async function createBusinessWithOwner(businessName: string, owner: NewOw
 
   for (let attempt = 0; attempt < 5; attempt++) {
     try {
-      return await prisma.$transaction(async (tx) => {
+      // Creating a business's default BusinessHour rows needs the RLS escape
+      // hatch: the tenant_isolation policy requires app.business_id to
+      // already match, but there's no existing business to scope into yet.
+      return await withSuperAdmin(async (tx) => {
         const business = await tx.business.create({
           data: {
             name: businessName,

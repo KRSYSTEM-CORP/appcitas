@@ -13,7 +13,8 @@ function passwordField(label: string) {
     .min(8, `${label} debe tener al menos 8 caracteres`)
     .regex(/[A-Z]/, `${label} debe incluir al menos una mayúscula`)
     .regex(/[a-z]/, `${label} debe incluir al menos una minúscula`)
-    .regex(/[0-9]/, `${label} debe incluir al menos un número`);
+    .regex(/[0-9]/, `${label} debe incluir al menos un número`)
+    .regex(/[^a-zA-Z0-9]/, `${label} debe incluir al menos un símbolo especial`);
 }
 
 export const SubdomainSchema = z

@@ -6,10 +6,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { resetPassword } from "@/lib/actions/auth";
+import { PasswordRequirements } from "@/components/auth/PasswordRequirements";
 
 export function ResetPasswordForm({ token }: { token: string }) {
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
+  const [password, setPassword] = useState("");
   const [isPending, startTransition] = useTransition();
 
   function handleSubmit(formData: FormData) {
@@ -40,10 +42,16 @@ export function ResetPasswordForm({ token }: { token: string }) {
     <form action={handleSubmit} className="flex flex-col gap-4 max-w-sm mx-auto">
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="password">Nueva contraseña</Label>
-        <Input id="password" name="password" type="password" minLength={8} required />
-        <p className="text-xs text-muted-foreground">
-          Mínimo 8 caracteres, con mayúscula, minúscula y número.
-        </p>
+        <Input
+          id="password"
+          name="password"
+          type="password"
+          minLength={8}
+          required
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+        />
+        <PasswordRequirements password={password} />
       </div>
 
       <div className="flex flex-col gap-1.5">

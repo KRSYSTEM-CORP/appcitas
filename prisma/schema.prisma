@@ -179,9 +179,10 @@ model User {
   // person uses "Continuar con Google", whether that creates a brand-new
   // business or links onto an existing email/password account.
   googleId     String?    @unique
-  // True immediately for a Google account (Google already confirmed the
-  // address) — only an email/password signup starts false and needs the
-  // link in sendVerificationEmail. Not enforced as a login gate today, just
+  // True for every account by the time it's created: Google already
+  // confirmed the address, and an email/password signup only reaches
+  // createBusinessWithOwner after confirmSignupCode() verifies the emailed
+  // code (see lib/actions/auth.ts). Not enforced as a login gate, just
   // tracked so a confirmed real address exists for support/notifications.
   emailVerified Boolean   @default(false)
   role         Role       @default(OWNER)
@@ -200,7 +201,6 @@ model User {
 
   specialist              Specialist?
   passwordResetTokens     PasswordResetToken[]
-  emailVerificationTokens EmailVerificationToken[]
 
   @@index([businessId])
 }
@@ -221,18 +221,24 @@ model PasswordResetToken {
   @@index([userId])
 }
 
-// Same single-use, sha256-hashed pattern as PasswordResetToken, for
-// confirming an email/password signup owns the address it registered with.
-model EmailVerificationToken {
-  id        String    @id @default(cuid())
-  userId    String
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  tokenHash String    @unique
+// Holds a pending email/password signup between "sent the code" and
+// "confirmed it" — the account itself (Business/User) is only created once
+// the code checks out, so there's no half-created business sitting around
+// for an abandoned or fake signup. payload is the JSON-encoded SignupPayload
+// (see lib/actions/auth.ts) needed to finish provisioning. Replaces the
+// earlier link-based EmailVerificationToken flow: the code now stands in
+// for that confirmation, so User.emailVerified is set true at creation time
+// for both this path and Google's.
+model SignupVerification {
+  id        String   @id @default(cuid())
+  email     String
+  codeHash  String
+  payload   String
+  attempts  Int      @default(0)
   expiresAt DateTime
-  usedAt    DateTime?
-  createdAt DateTime  @default(now())
+  createdAt DateTime @default(now())
 
-  @@index([userId])
+  @@index([email])
 }
 
 // A single failed/attempted hit against a rate-limited auth action (login,

@@ -1,11 +1,11 @@
 "use server";
 
-import { randomBytes, createHash } from "crypto";
+import { randomBytes, randomInt, createHash } from "crypto";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { hashPassword, verifyPassword } from "@/lib/password";
 import { setSessionCookie, clearSessionCookie } from "@/lib/session";
-import { sendPasswordResetEmail, sendVerificationEmail } from "@/lib/email";
+import { sendPasswordResetEmail, sendSignupCodeEmail } from "@/lib/email";
 import { createBusinessWithOwner } from "@/lib/business-provisioning";
 import { checkRateLimit, recordFailedAttempt, clearAttempts, rateLimitMessage } from "@/lib/rate-limit";
 import { getClientIp } from "@/lib/request-ip";
@@ -19,21 +19,41 @@ import {
 import type { ActionResult } from "@/lib/types";
 
 const RESET_TOKEN_TTL_MS = 60 * 60 * 1000;
-const VERIFICATION_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 const LOGIN_MAX_ATTEMPTS = 8;
 const RESET_REQUEST_WINDOW_MS = 60 * 60 * 1000;
 const RESET_REQUEST_MAX_ATTEMPTS = 3;
+const SIGNUP_CODE_TTL_MS = 10 * 60 * 1000;
+const SIGNUP_CODE_MAX_ATTEMPTS = 5;
+const SIGNUP_RESEND_WINDOW_MS = 10 * 60 * 1000;
+const SIGNUP_RESEND_MAX_ATTEMPTS = 3;
 
 function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
 
-// Self-serve: the business is active immediately, with a free trial (see
-// createBusinessWithOwner/lib/billing.ts) — no super admin approval step.
-// Auto-logs in and lands straight on /agenda, the same way the Google
-// signup path (app/api/auth/google/callback) does.
-export async function signup(formData: FormData): Promise<ActionResult> {
+function hashSignupCode(code: string): string {
+  return createHash("sha256").update(code).digest("hex");
+}
+
+function generateSignupCode(): string {
+  return String(randomInt(0, 1_000_000)).padStart(6, "0");
+}
+
+type SignupPayload = { businessName: string; subdomain: string; email: string; passwordHash: string };
+
+export type SignupCodeResult =
+  | { success: true; verificationId: string; email: string }
+  | { success: false; error: string };
+
+// Step 1 of signup: validates the form, emails a 6-digit code, and stashes
+// everything needed to finish provisioning in SignupVerification — the
+// Business/User only get created once confirmSignupCode() checks the code,
+// so an abandoned or fake signup never leaves a half-created business
+// behind. Auto-logs in and lands on /agenda once confirmed, the same way
+// the Google signup path (app/api/auth/google/callback) does (Google's
+// signup skips this: Google already confirmed that address).
+export async function requestSignupCode(formData: FormData): Promise<SignupCodeResult> {
   const ip = await getClientIp();
   const rl = await checkRateLimit("signup", ip, 5, 60 * 60_000);
   if (!rl.allowed) return { success: false, error: rateLimitMessage(rl.retryAfterMinutes) };
@@ -68,44 +88,99 @@ export async function signup(formData: FormData): Promise<ActionResult> {
   }
 
   const passwordHash = hashPassword(password);
+  const payload: SignupPayload = { businessName, subdomain, email, passwordHash };
+  const code = generateSignupCode();
+
+  // Only one pending signup per email at a time — a retry (e.g. "no me
+  // llegó el código") replaces the previous attempt instead of piling up
+  // rows that would otherwise all race to create the same account.
+  await prisma.signupVerification.deleteMany({ where: { email } });
+  const verification = await prisma.signupVerification.create({
+    data: {
+      email,
+      codeHash: hashSignupCode(code),
+      payload: JSON.stringify(payload),
+      expiresAt: new Date(Date.now() + SIGNUP_CODE_TTL_MS),
+    },
+  });
+
+  await sendSignupCodeEmail(email, code);
+
+  return { success: true, verificationId: verification.id, email };
+}
+
+// Step 2: checks the code and, only if it matches, actually creates the
+// business/owner and logs them in.
+export async function confirmSignupCode(verificationId: string, code: string): Promise<ActionResult> {
+  const genericError = "Este código venció o no es válido. Solicita uno nuevo.";
+  const verification = await prisma.signupVerification.findUnique({ where: { id: verificationId } });
+  if (!verification) return { success: false, error: genericError };
+
+  if (verification.expiresAt < new Date()) {
+    await prisma.signupVerification.delete({ where: { id: verificationId } });
+    return { success: false, error: genericError };
+  }
+
+  if (verification.attempts >= SIGNUP_CODE_MAX_ATTEMPTS) {
+    await prisma.signupVerification.delete({ where: { id: verificationId } });
+    return { success: false, error: "Demasiados intentos. Solicita un nuevo código." };
+  }
+
+  if (hashSignupCode(code) !== verification.codeHash) {
+    await prisma.signupVerification.update({
+      where: { id: verificationId },
+      data: { attempts: { increment: 1 } },
+    });
+    const remaining = SIGNUP_CODE_MAX_ATTEMPTS - verification.attempts - 1;
+    return { success: false, error: `Código incorrecto. Te quedan ${remaining} intentos.` };
+  }
+
+  const { businessName, subdomain, email, passwordHash } = JSON.parse(verification.payload) as SignupPayload;
+
+  // Re-checked here (not just at request time) in case the address or
+  // subdomain was taken by someone else in the minutes between requesting
+  // and confirming the code.
+  const [existingUser, existingSubdomain] = await Promise.all([
+    prisma.user.findUnique({ where: { email } }),
+    prisma.business.findUnique({ where: { subdomain } }),
+  ]);
+  if (existingUser || existingSubdomain) {
+    await prisma.signupVerification.delete({ where: { id: verificationId } });
+    return {
+      success: false,
+      error: existingUser ? "Ese correo ya está registrado" : "Ese subdominio ya está en uso, elige otro",
+    };
+  }
+
   const { business, user } = await createBusinessWithOwner(
     businessName,
     { email, passwordHash, firstName: businessName, lastName: "" },
     subdomain,
   );
-
-  const rawToken = randomBytes(32).toString("hex");
-  await prisma.emailVerificationToken.create({
-    data: {
-      userId: user.id,
-      tokenHash: hashToken(rawToken),
-      expiresAt: new Date(Date.now() + VERIFICATION_TOKEN_TTL_MS),
-    },
-  });
-  await sendVerificationEmail(email, rawToken);
+  await prisma.signupVerification.delete({ where: { id: verificationId } });
 
   await setSessionCookie({ uid: user.id, bid: business.id, businessName: business.name });
   redirect("/agenda");
 }
 
-// Confirms the address behind a token from sendVerificationEmail — called
-// directly (server-to-server, no client form) from
-// app/(app)/verify-email/[token]/page.tsx. Not a login gate today: the
-// account already works right after signup, this just records that the
-// address was real.
-export async function verifyEmail(token: string): Promise<ActionResult> {
-  const genericError = "Este enlace no es válido o ya venció.";
-  const verificationToken = await prisma.emailVerificationToken.findUnique({
-    where: { tokenHash: hashToken(token) },
-  });
-  if (!verificationToken || verificationToken.usedAt || verificationToken.expiresAt < new Date()) {
-    return { success: false, error: genericError };
+// "No me llegó el código" — reuses the same verification row (same payload,
+// same email) with a fresh code/expiry/attempt count.
+export async function resendSignupCode(verificationId: string): Promise<ActionResult> {
+  const verification = await prisma.signupVerification.findUnique({ where: { id: verificationId } });
+  if (!verification) {
+    return { success: false, error: "Esta verificación venció. Vuelve a empezar el registro." };
   }
 
-  await prisma.$transaction([
-    prisma.user.update({ where: { id: verificationToken.userId }, data: { emailVerified: true } }),
-    prisma.emailVerificationToken.update({ where: { id: verificationToken.id }, data: { usedAt: new Date() } }),
-  ]);
+  const rl = await checkRateLimit("signup-resend", verificationId, SIGNUP_RESEND_MAX_ATTEMPTS, SIGNUP_RESEND_WINDOW_MS);
+  if (!rl.allowed) return { success: false, error: rateLimitMessage(rl.retryAfterMinutes) };
+  await recordFailedAttempt("signup-resend", verificationId);
+
+  const code = generateSignupCode();
+  await prisma.signupVerification.update({
+    where: { id: verificationId },
+    data: { codeHash: hashSignupCode(code), attempts: 0, expiresAt: new Date(Date.now() + SIGNUP_CODE_TTL_MS) },
+  });
+  await sendSignupCodeEmail(verification.email, code);
 
   return { success: true };
 }

@@ -53,21 +53,16 @@ export async function sendAnnouncementEmail(
   );
 }
 
-export async function sendVerificationEmail(to: string, token: string): Promise<void> {
-  const verifyUrl = `${APP_URL}/verify-email/${token}`;
+export async function sendSignupCodeEmail(to: string, code: string): Promise<void> {
   await send(
     to,
-    "Confirma tu correo — KR Citas",
+    "Tu código de verificación — KR Citas",
     `
       <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
         <h2>Confirma tu correo</h2>
-        <p>Gracias por registrar tu negocio en KR Citas. Confirma que este es tu correo:</p>
-        <p>
-          <a href="${verifyUrl}" style="display: inline-block; background: #4f3ddb; color: #fff; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: 600;">
-            Confirmar correo
-          </a>
-        </p>
-        <p>Este enlace vence en 24 horas. Si no creaste esta cuenta, puedes ignorar este correo.</p>
+        <p>Usa este código para terminar de registrar tu negocio en KR Citas:</p>
+        <p style="font-size: 32px; font-weight: 700; letter-spacing: 6px; text-align: center; margin: 24px 0;">${code}</p>
+        <p>Este código vence en 10 minutos. Si no intentaste crear una cuenta, puedes ignorar este correo.</p>
         <p style="color: #888; font-size: 12px; margin-top: 32px;">KR Citas — By KR System</p>
       </div>
     `,

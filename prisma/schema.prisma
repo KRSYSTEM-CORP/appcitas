@@ -197,6 +197,12 @@ model User {
   // already knows the app suddenly gets the tour forced on them; only
   // brand-new signups/specialists start false.
   hasSeenTour  Boolean    @default(true)
+  // When this account accepted the Términos y Condiciones / Política de
+  // Privacidad — set once, at signup (see confirmSignupCode in
+  // lib/actions/auth.ts), for both the email/password and Google paths.
+  // Null for every account created before this field existed; never
+  // backfilled or gated on for them, only recorded going forward.
+  termsAcceptedAt DateTime?
   createdAt    DateTime   @default(now())
 
   specialist              Specialist?

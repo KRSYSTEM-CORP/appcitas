@@ -1,12 +1,19 @@
 "use server";
 
-import { randomBytes, randomInt, createHash } from "crypto";
+import { randomBytes, createHash } from "crypto";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { hashPassword, verifyPassword } from "@/lib/password";
 import { setSessionCookie, clearSessionCookie } from "@/lib/session";
 import { sendPasswordResetEmail, sendSignupCodeEmail } from "@/lib/email";
 import { createBusinessWithOwner } from "@/lib/business-provisioning";
+import {
+  SIGNUP_CODE_TTL_MS,
+  SIGNUP_CODE_MAX_ATTEMPTS,
+  hashSignupCode,
+  generateSignupCode,
+  createSignupVerification,
+} from "@/lib/signup-verification";
 import { checkRateLimit, recordFailedAttempt, clearAttempts, rateLimitMessage } from "@/lib/rate-limit";
 import { getClientIp } from "@/lib/request-ip";
 import { verifyTurnstileToken } from "@/lib/turnstile";
@@ -23,24 +30,28 @@ const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 const LOGIN_MAX_ATTEMPTS = 8;
 const RESET_REQUEST_WINDOW_MS = 60 * 60 * 1000;
 const RESET_REQUEST_MAX_ATTEMPTS = 3;
-const SIGNUP_CODE_TTL_MS = 10 * 60 * 1000;
-const SIGNUP_CODE_MAX_ATTEMPTS = 5;
 const SIGNUP_RESEND_WINDOW_MS = 10 * 60 * 1000;
 const SIGNUP_RESEND_MAX_ATTEMPTS = 3;
+const TERMS_ERROR = "Debes aceptar los Términos y Condiciones y la Política de Privacidad para continuar.";
 
 function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
 
-function hashSignupCode(code: string): string {
-  return createHash("sha256").update(code).digest("hex");
-}
-
-function generateSignupCode(): string {
-  return String(randomInt(0, 1_000_000)).padStart(6, "0");
-}
-
-type SignupPayload = { businessName: string; subdomain: string; email: string; passwordHash: string };
+// subdomain is only set for the manual path (already validated unique) —
+// omitted for a Google signup, which lets createBusinessWithOwner generate
+// one from businessName, exactly like it always did for Google before this
+// change. passwordHash is set for the email/password path, googleId for a
+// brand-new Google signup — never both.
+type SignupPayload = {
+  businessName: string;
+  subdomain?: string;
+  email: string;
+  passwordHash?: string;
+  googleId?: string;
+  firstName: string;
+  lastName: string;
+};
 
 export type SignupCodeResult =
   | { success: true; verificationId: string; email: string }
@@ -87,31 +98,41 @@ export async function requestSignupCode(formData: FormData): Promise<SignupCodeR
     return { success: false, error: "Ese subdominio ya está en uso, elige otro" };
   }
 
-  const passwordHash = hashPassword(password);
-  const payload: SignupPayload = { businessName, subdomain, email, passwordHash };
-  const code = generateSignupCode();
+  if (formData.get("acceptedTerms") !== "on") {
+    return { success: false, error: TERMS_ERROR };
+  }
 
-  // Only one pending signup per email at a time — a retry (e.g. "no me
-  // llegó el código") replaces the previous attempt instead of piling up
-  // rows that would otherwise all race to create the same account.
-  await prisma.signupVerification.deleteMany({ where: { email } });
-  const verification = await prisma.signupVerification.create({
-    data: {
-      email,
-      codeHash: hashSignupCode(code),
-      payload: JSON.stringify(payload),
-      expiresAt: new Date(Date.now() + SIGNUP_CODE_TTL_MS),
-    },
-  });
+  const passwordHash = hashPassword(password);
+  const payload: SignupPayload = {
+    businessName,
+    subdomain,
+    email,
+    passwordHash,
+    firstName: businessName,
+    lastName: "",
+  };
+  const { verificationId, code } = await createSignupVerification(email, payload);
 
   await sendSignupCodeEmail(email, code);
 
-  return { success: true, verificationId: verification.id, email };
+  return { success: true, verificationId, email };
 }
 
 // Step 2: checks the code and, only if it matches, actually creates the
-// business/owner and logs them in.
-export async function confirmSignupCode(verificationId: string, code: string): Promise<ActionResult> {
+// business/owner and logs them in. acceptedTerms is required here (not
+// just at request time) because a brand-new Google signup (see
+// app/api/auth/google/callback/route.ts) never goes through
+// requestSignupCode at all — this is the one place both paths are
+// guaranteed to pass through.
+export async function confirmSignupCode(
+  verificationId: string,
+  code: string,
+  acceptedTerms: boolean
+): Promise<ActionResult> {
+  if (!acceptedTerms) {
+    return { success: false, error: TERMS_ERROR };
+  }
+
   const genericError = "Este código venció o no es válido. Solicita uno nuevo.";
   const verification = await prisma.signupVerification.findUnique({ where: { id: verificationId } });
   if (!verification) return { success: false, error: genericError };
@@ -135,14 +156,17 @@ export async function confirmSignupCode(verificationId: string, code: string): P
     return { success: false, error: `Código incorrecto. Te quedan ${remaining} intentos.` };
   }
 
-  const { businessName, subdomain, email, passwordHash } = JSON.parse(verification.payload) as SignupPayload;
+  const { businessName, subdomain, email, passwordHash, googleId, firstName, lastName } = JSON.parse(
+    verification.payload
+  ) as SignupPayload;
 
   // Re-checked here (not just at request time) in case the address or
   // subdomain was taken by someone else in the minutes between requesting
-  // and confirming the code.
+  // and confirming the code. subdomain is undefined for a Google signup —
+  // nothing to re-check, createBusinessWithOwner generates one below.
   const [existingUser, existingSubdomain] = await Promise.all([
     prisma.user.findUnique({ where: { email } }),
-    prisma.business.findUnique({ where: { subdomain } }),
+    subdomain ? prisma.business.findUnique({ where: { subdomain } }) : Promise.resolve(null),
   ]);
   if (existingUser || existingSubdomain) {
     await prisma.signupVerification.delete({ where: { id: verificationId } });
@@ -154,7 +178,7 @@ export async function confirmSignupCode(verificationId: string, code: string): P
 
   const { business, user } = await createBusinessWithOwner(
     businessName,
-    { email, passwordHash, firstName: businessName, lastName: "" },
+    { email, passwordHash, googleId, firstName, lastName },
     subdomain,
   );
   await prisma.signupVerification.delete({ where: { id: verificationId } });

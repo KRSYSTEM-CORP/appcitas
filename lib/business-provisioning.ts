@@ -98,6 +98,10 @@ export async function createBusinessWithOwner(businessName: string, owner: NewOw
             // confirmSignupCode() verifies the emailed code (lib/actions/auth.ts).
             emailVerified: true,
             hasSeenTour: false,
+            // Only ever called from confirmSignupCode() (lib/actions/auth.ts),
+            // which already required acceptedTerms === true before reaching
+            // here — for both the email/password and Google paths.
+            termsAcceptedAt: new Date(),
             businessId: business.id,
             firstName: owner.firstName,
             lastName: owner.lastName,

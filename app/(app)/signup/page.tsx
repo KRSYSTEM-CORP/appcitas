@@ -7,9 +7,9 @@ import { googleOAuthConfigured } from "@/lib/google-oauth";
 export default async function SignupPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; vid?: string; email?: string }>;
 }) {
-  const { error } = await searchParams;
+  const { error, vid, email } = await searchParams;
   return (
     <div className="flex flex-col min-h-full">
       <div className="flex-1 flex flex-col gap-6 p-6 py-16">
@@ -26,7 +26,12 @@ export default async function SignupPage({
             </p>
           </div>
         </div>
-        <SignupForm googleConfigured={googleOAuthConfigured()} authError={error} />
+        <SignupForm
+          googleConfigured={googleOAuthConfigured()}
+          authError={error}
+          initialVerificationId={vid}
+          initialEmail={email}
+        />
         <p className="text-center text-sm text-muted-foreground">
           ¿Quieres este sistema para tu negocio o más información?{" "}
           <a

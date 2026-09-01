@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { login, getBusinessBrandingByEmail, type BusinessBranding } from "@/lib/actions/auth";
 import { deriveBrandVars, BRAND_VAR_NAMES } from "@/lib/theme-color";
 import { GoogleIcon } from "@/components/auth/GoogleIcon";
+import { Turnstile } from "@/components/auth/Turnstile";
 
 const NO_BRANDING: BusinessBranding = { logoDataUrl: null, brandColor: null, brandBackground: null };
 
@@ -16,6 +17,7 @@ const GOOGLE_ERRORS: Record<string, string> = {
   google_cancelado: "Cancelaste el inicio de sesión con Google.",
   google_estado_invalido: "El enlace de Google expiró o no es válido. Intenta de nuevo.",
   google_fallo: "Google no pudo confirmar tu cuenta. Intenta de nuevo.",
+  google_turnstile_fallido: "No pudimos verificar que eres humano. Intenta de nuevo.",
   cuenta_pendiente: "Tu cuenta está pendiente de aprobación.",
   cuenta_suspendida: "Tu acceso está suspendido.",
 };
@@ -29,6 +31,7 @@ export function LoginForm({
 }) {
   const [error, setError] = useState<string | null>(null);
   const [branding, setBranding] = useState<BusinessBranding>(NO_BRANDING);
+  const [turnstileToken, setTurnstileToken] = useState("");
   const [isPending, startTransition] = useTransition();
 
   // Live-preview a business's own colors/logo on the login screen itself, as
@@ -53,6 +56,17 @@ export function LoginForm({
     });
   }
 
+  function handleGoogleClick() {
+    if (!turnstileToken && process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY) {
+      setError("Resuelve la verificación de seguridad para continuar.");
+      return;
+    }
+    const url = new URL("/api/auth/google/start", window.location.origin);
+    url.searchParams.set("from", "login");
+    if (turnstileToken) url.searchParams.set("token", turnstileToken);
+    window.location.href = url.toString();
+  }
+
   async function handleEmailBlur(e: React.FocusEvent<HTMLInputElement>) {
     const email = e.target.value;
     if (!email) {
@@ -74,10 +88,15 @@ export function LoginForm({
 
       {googleConfigured && (
         <>
-          <a href="/api/auth/google/start" className={buttonVariants({ variant: "outline", size: "lg" })}>
+          <Turnstile onVerify={setTurnstileToken} />
+          <button
+            type="button"
+            onClick={handleGoogleClick}
+            className={buttonVariants({ variant: "outline", size: "lg" })}
+          >
             <GoogleIcon />
             Continuar con Google
-          </a>
+          </button>
           <div className="flex items-center gap-3 text-xs text-muted-foreground">
             <div className="h-px flex-1 bg-border" />o<div className="h-px flex-1 bg-border" />
           </div>

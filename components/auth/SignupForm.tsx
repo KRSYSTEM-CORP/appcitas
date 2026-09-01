@@ -15,19 +15,62 @@ const GOOGLE_ERRORS: Record<string, string> = {
   google_cancelado: "Cancelaste el inicio de sesión con Google.",
   google_estado_invalido: "El enlace de Google expiró o no es válido. Intenta de nuevo.",
   google_fallo: "Google no pudo confirmar tu cuenta. Intenta de nuevo.",
+  google_turnstile_fallido: "No pudimos verificar que eres humano. Intenta de nuevo.",
   cuenta_pendiente: "Tu cuenta está pendiente de aprobación.",
   cuenta_suspendida: "Tu acceso está suspendido.",
 };
 
 const RESEND_COOLDOWN_S = 30;
 
-export function SignupForm({ googleConfigured, authError }: { googleConfigured: boolean; authError?: string }) {
-  const [step, setStep] = useState<"form" | "code">("form");
+function TermsCheckbox({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <label className="flex items-start gap-2 text-sm text-muted-foreground">
+      <input
+        type="checkbox"
+        name="acceptedTerms"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        className="mt-0.5 size-4 shrink-0 accent-primary"
+      />
+      <span>
+        Acepto los{" "}
+        <Link href="/terminos" target="_blank" className="text-foreground underline underline-offset-4">
+          Términos y Condiciones
+        </Link>{" "}
+        y la{" "}
+        <Link href="/privacidad" target="_blank" className="text-foreground underline underline-offset-4">
+          Política de Privacidad
+        </Link>
+        .
+      </span>
+    </label>
+  );
+}
+
+export function SignupForm({
+  googleConfigured,
+  authError,
+  initialVerificationId,
+  initialEmail,
+}: {
+  googleConfigured: boolean;
+  authError?: string;
+  initialVerificationId?: string;
+  initialEmail?: string;
+}) {
+  // A brand-new Google signup (app/api/auth/google/callback) lands back here
+  // with vid/email already in the URL, skipping straight to the code step —
+  // it never went through the manual form below, so the terms checkbox that
+  // step would have shown gets rendered on the code step instead.
+  const viaGoogle = Boolean(initialVerificationId);
+  const [step, setStep] = useState<"form" | "code">(viaGoogle ? "code" : "form");
   const [error, setError] = useState<string | null>(null);
   const [subdomain, setSubdomain] = useState("");
   const [password, setPassword] = useState("");
-  const [verificationId, setVerificationId] = useState<string | null>(null);
-  const [pendingEmail, setPendingEmail] = useState("");
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
+  const [turnstileToken, setTurnstileToken] = useState("");
+  const [verificationId, setVerificationId] = useState<string | null>(initialVerificationId ?? null);
+  const [pendingEmail, setPendingEmail] = useState(initialEmail ?? "");
   const [code, setCode] = useState("");
   const [resendCooldown, setResendCooldown] = useState(0);
   const [isPending, startTransition] = useTransition();
@@ -47,6 +90,10 @@ export function SignupForm({ googleConfigured, authError }: { googleConfigured: 
 
   function handleRequestCode(formData: FormData) {
     setError(null);
+    if (formData.get("acceptedTerms") !== "on") {
+      setError("Debes aceptar los Términos y Condiciones y la Política de Privacidad para continuar.");
+      return;
+    }
     startTransition(async () => {
       const result = await requestSignupCode(formData);
       if (!result.success) {
@@ -62,9 +109,13 @@ export function SignupForm({ googleConfigured, authError }: { googleConfigured: 
 
   function handleConfirmCode() {
     if (!verificationId) return;
+    if (viaGoogle && !acceptedTerms) {
+      setError("Debes aceptar los Términos y Condiciones y la Política de Privacidad para continuar.");
+      return;
+    }
     setError(null);
     startTransition(async () => {
-      const result = await confirmSignupCode(verificationId, code);
+      const result = await confirmSignupCode(verificationId, code, viaGoogle ? acceptedTerms : true);
       if (!result.success) setError(result.error);
     });
   }
@@ -80,6 +131,17 @@ export function SignupForm({ googleConfigured, authError }: { googleConfigured: 
       }
       tickResendCooldown();
     });
+  }
+
+  function handleGoogleClick() {
+    if (!turnstileToken && process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY) {
+      setError("Resuelve la verificación de seguridad para continuar.");
+      return;
+    }
+    const url = new URL("/api/auth/google/start", window.location.origin);
+    url.searchParams.set("from", "signup");
+    if (turnstileToken) url.searchParams.set("token", turnstileToken);
+    window.location.href = url.toString();
   }
 
   if (step === "code") {
@@ -105,9 +167,16 @@ export function SignupForm({ googleConfigured, authError }: { googleConfigured: 
           />
         </div>
 
+        {viaGoogle && <TermsCheckbox checked={acceptedTerms} onChange={setAcceptedTerms} />}
+
         {error && <p className="text-sm text-destructive">{error}</p>}
 
-        <Button type="button" disabled={isPending || code.length !== 6} size="lg" onClick={handleConfirmCode}>
+        <Button
+          type="button"
+          disabled={isPending || code.length !== 6 || (viaGoogle && !acceptedTerms)}
+          size="lg"
+          onClick={handleConfirmCode}
+        >
           {isPending ? "Verificando..." : "Confirmar código"}
         </Button>
 
@@ -120,17 +189,19 @@ export function SignupForm({ googleConfigured, authError }: { googleConfigured: 
           >
             {resendCooldown > 0 ? `Reenviar código (${resendCooldown}s)` : "Reenviar código"}
           </button>
-          <button
-            type="button"
-            className="underline underline-offset-4"
-            onClick={() => {
-              setStep("form");
-              setError(null);
-              setCode("");
-            }}
-          >
-            Cambiar datos
-          </button>
+          {!viaGoogle && (
+            <button
+              type="button"
+              className="underline underline-offset-4"
+              onClick={() => {
+                setStep("form");
+                setError(null);
+                setCode("");
+              }}
+            >
+              Cambiar datos
+            </button>
+          )}
         </div>
       </div>
     );
@@ -146,12 +217,17 @@ export function SignupForm({ googleConfigured, authError }: { googleConfigured: 
         <>
           {/* Con Google no hace falta pedir nombre de negocio, subdominio ni
               clave: el negocio se crea solo, con un subdominio generado a
-              partir del nombre — todo ajustable después desde Configuración.
-              Es justo lo que hace que el alta sea "de un clic". */}
-          <a href="/api/auth/google/start" className={buttonVariants({ variant: "outline", size: "lg" })}>
+              partir del nombre. Igual pasa por el mismo Turnstile de abajo
+              y, si es alta nueva, por el mismo paso de código que el
+              formulario manual (ver app/api/auth/google/callback/route.ts). */}
+          <button
+            type="button"
+            onClick={handleGoogleClick}
+            className={buttonVariants({ variant: "outline", size: "lg" })}
+          >
             <GoogleIcon />
             Crear negocio con Google
-          </a>
+          </button>
           <div className="flex items-center gap-3 text-xs text-muted-foreground">
             <div className="h-px flex-1 bg-border" />o<div className="h-px flex-1 bg-border" />
           </div>
@@ -199,11 +275,13 @@ export function SignupForm({ googleConfigured, authError }: { googleConfigured: 
           <PasswordRequirements password={password} />
         </div>
 
-        <Turnstile />
+        <Turnstile onVerify={setTurnstileToken} />
+
+        <TermsCheckbox checked={acceptedTerms} onChange={setAcceptedTerms} />
 
         {error && <p className="text-sm text-destructive">{error}</p>}
 
-        <Button type="submit" disabled={isPending} size="lg">
+        <Button type="submit" disabled={isPending || !acceptedTerms} size="lg">
           {isPending ? "Enviando código..." : "Crear negocio"}
         </Button>
       </form>

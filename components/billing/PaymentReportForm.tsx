@@ -10,11 +10,11 @@ import { PAYMENT_METHOD_LABELS } from "@/lib/format";
 import { PAYMENT_METHODS_REQUIRING_REFERENCE } from "@/lib/validations";
 import type { PaymentMethod } from "@prisma/client";
 
-// The subscription only accepts this one rail now — no more cash, card,
-// Transferencia, Pago Móvil, etc. for paying KR System itself (this
-// restriction is specific to this billing report, not the general
-// PAYMENT_METHOD_LABELS used elsewhere for a business' own service payments).
-const BILLING_PAYMENT_METHODS: PaymentMethod[] = ["BINANCE"];
+// The subscription accepts exactly these two rails — no more cash, card,
+// Transferencia, etc. for paying KR System itself (this restriction is
+// specific to this billing report, not the general PAYMENT_METHOD_LABELS
+// used elsewhere for a business' own service payments).
+const BILLING_PAYMENT_METHODS: PaymentMethod[] = ["BINANCE", "PAGO_MOVIL"];
 
 type ReportLine = { paymentMethod: PaymentMethod; amount: string; reference: string };
 

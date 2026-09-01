@@ -179,16 +179,28 @@ model User {
   // person uses "Continuar con Google", whether that creates a brand-new
   // business or links onto an existing email/password account.
   googleId     String?    @unique
+  // True immediately for a Google account (Google already confirmed the
+  // address) — only an email/password signup starts false and needs the
+  // link in sendVerificationEmail. Not enforced as a login gate today, just
+  // tracked so a confirmed real address exists for support/notifications.
+  emailVerified Boolean   @default(false)
   role         Role       @default(OWNER)
   status       UserStatus @default(ACTIVE)
   // Platform-level administrator (not tied to any one business) — can
   // approve/deny/suspend any business's access from /admin. Not settable
   // from the app itself; only ever changed directly in the database.
   isSuperAdmin Boolean    @default(false)
+  // Whether this user has clicked through (or skipped) the first-time
+  // product tour shown right after login — see components/onboarding/
+  // ProductTour.tsx. Existing accounts default to true so nobody who
+  // already knows the app suddenly gets the tour forced on them; only
+  // brand-new signups/specialists start false.
+  hasSeenTour  Boolean    @default(true)
   createdAt    DateTime   @default(now())
 
-  specialist          Specialist?
-  passwordResetTokens PasswordResetToken[]
+  specialist              Specialist?
+  passwordResetTokens     PasswordResetToken[]
+  emailVerificationTokens EmailVerificationToken[]
 
   @@index([businessId])
 }
@@ -198,6 +210,20 @@ model User {
 // value only ever exists in the emailed link and the requester's browser, so
 // a database leak alone can't be used to reset anyone's password.
 model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+// Same single-use, sha256-hashed pattern as PasswordResetToken, for
+// confirming an email/password signup owns the address it registered with.
+model EmailVerificationToken {
   id        String    @id @default(cuid())
   userId    String
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -609,6 +635,15 @@ model PlatformSettings {
   // Binance Pay ID / UID, shown alongside the QR as a manual fallback for
   // whoever can't scan it.
   binanceId                 String?
+  // Pago Móvil details for paying the subscription in Bolívares — the
+  // second rail alongside Binance/USDT above. Same manual-report-then-
+  // super-admin-approves flow as Binance; there's no bank webhook wired up,
+  // this is just where to send it (see /billing and PaymentReportForm's
+  // BILLING_PAYMENT_METHODS, which accepts "PAGO_MOVIL").
+  pagoMovilBank             String?
+  pagoMovilPhone            String?
+  // Cédula or RIF the Pago Móvil account is registered under.
+  pagoMovilId               String?
   // Applied to Business.monthlyFeeUsdCents automatically when a super admin
   // approves a new signup and leaves the fee field blank (see approveBusiness
   // in lib/actions/admin.ts).

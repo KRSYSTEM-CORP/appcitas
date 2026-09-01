@@ -93,6 +93,11 @@ export async function createBusinessWithOwner(businessName: string, owner: NewOw
             email: owner.email,
             passwordHash: owner.passwordHash,
             googleId: owner.googleId,
+            // Google already confirmed this address; only the email/password
+            // path needs the separate verification email (see signup() in
+            // lib/actions/auth.ts).
+            emailVerified: Boolean(owner.googleId),
+            hasSeenTour: false,
             businessId: business.id,
             firstName: owner.firstName,
             lastName: owner.lastName,

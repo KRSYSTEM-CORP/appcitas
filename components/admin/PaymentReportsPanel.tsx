@@ -31,11 +31,17 @@ export function PlatformSettingsForm({
   initialInstructions,
   initialBinanceQrDataUrl,
   initialBinanceId,
+  initialPagoMovilBank,
+  initialPagoMovilPhone,
+  initialPagoMovilId,
   initialDefaultMonthlyFeeUsdCents,
 }: {
   initialInstructions: string | null;
   initialBinanceQrDataUrl: string | null;
   initialBinanceId: string | null;
+  initialPagoMovilBank: string | null;
+  initialPagoMovilPhone: string | null;
+  initialPagoMovilId: string | null;
   initialDefaultMonthlyFeeUsdCents: number | null;
 }) {
   const [isPending, startTransition] = useTransition();
@@ -43,6 +49,9 @@ export function PlatformSettingsForm({
   const [instructions, setInstructions] = useState(initialInstructions ?? "");
   const [binanceQrDataUrl, setBinanceQrDataUrl] = useState(initialBinanceQrDataUrl ?? "");
   const [binanceId, setBinanceId] = useState(initialBinanceId ?? "");
+  const [pagoMovilBank, setPagoMovilBank] = useState(initialPagoMovilBank ?? "");
+  const [pagoMovilPhone, setPagoMovilPhone] = useState(initialPagoMovilPhone ?? "");
+  const [pagoMovilId, setPagoMovilId] = useState(initialPagoMovilId ?? "");
   const [defaultFee, setDefaultFee] = useState(
     initialDefaultMonthlyFeeUsdCents != null ? String(initialDefaultMonthlyFeeUsdCents / 100) : ""
   );
@@ -71,6 +80,9 @@ export function PlatformSettingsForm({
         paymentInstructions: instructions,
         binanceQrDataUrl,
         binanceId,
+        pagoMovilBank,
+        pagoMovilPhone,
+        pagoMovilId,
         defaultMonthlyFee: defaultFee,
       });
       if (!result.success) {
@@ -138,6 +150,50 @@ export function PlatformSettingsForm({
           }}
         />
         <p className="text-xs text-muted-foreground">Ej. 123456789</p>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 rounded-lg border p-3">
+        <div className="sm:col-span-3">
+          <Label className="text-sm font-medium">Pago Móvil</Label>
+          <p className="text-xs text-muted-foreground">
+            Segundo método para pagar la suscripción, en bolívares.
+          </p>
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="platform-pm-bank">Banco</Label>
+          <Input
+            id="platform-pm-bank"
+            value={pagoMovilBank}
+            onChange={(e) => {
+              setPagoMovilBank(e.target.value);
+              setSaved(false);
+            }}
+          />
+          <p className="text-xs text-muted-foreground">Ej. Banesco</p>
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="platform-pm-phone">Teléfono</Label>
+          <Input
+            id="platform-pm-phone"
+            value={pagoMovilPhone}
+            onChange={(e) => {
+              setPagoMovilPhone(e.target.value);
+              setSaved(false);
+            }}
+          />
+          <p className="text-xs text-muted-foreground">Ej. 0412-1234567</p>
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="platform-pm-id">Cédula/RIF</Label>
+          <Input
+            id="platform-pm-id"
+            value={pagoMovilId}
+            onChange={(e) => {
+              setPagoMovilId(e.target.value);
+              setSaved(false);
+            }}
+          />
+          <p className="text-xs text-muted-foreground">Ej. V-12345678</p>
+        </div>
       </div>
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="platform-instructions">Notas adicionales (opcional)</Label>

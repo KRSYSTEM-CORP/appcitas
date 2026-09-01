@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { signup } from "@/lib/actions/auth";
 import { GoogleIcon } from "@/components/auth/GoogleIcon";
+import { Turnstile } from "@/components/auth/Turnstile";
 
 const GOOGLE_ERRORS: Record<string, string> = {
   google_no_configurado: "El inicio de sesión con Google no está configurado todavía.",
@@ -82,7 +83,12 @@ export function SignupForm({ googleConfigured, authError }: { googleConfigured: 
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="password">Contraseña</Label>
           <Input id="password" name="password" type="password" minLength={8} required />
+          <p className="text-xs text-muted-foreground">
+            Mínimo 8 caracteres, con mayúscula, minúscula y número.
+          </p>
         </div>
+
+        <Turnstile />
 
         {error && <p className="text-sm text-destructive">{error}</p>}
 

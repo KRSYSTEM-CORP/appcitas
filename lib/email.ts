@@ -53,6 +53,27 @@ export async function sendAnnouncementEmail(
   );
 }
 
+export async function sendVerificationEmail(to: string, token: string): Promise<void> {
+  const verifyUrl = `${APP_URL}/verify-email/${token}`;
+  await send(
+    to,
+    "Confirma tu correo — KR Citas",
+    `
+      <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+        <h2>Confirma tu correo</h2>
+        <p>Gracias por registrar tu negocio en KR Citas. Confirma que este es tu correo:</p>
+        <p>
+          <a href="${verifyUrl}" style="display: inline-block; background: #4f3ddb; color: #fff; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: 600;">
+            Confirmar correo
+          </a>
+        </p>
+        <p>Este enlace vence en 24 horas. Si no creaste esta cuenta, puedes ignorar este correo.</p>
+        <p style="color: #888; font-size: 12px; margin-top: 32px;">KR Citas — By KR System</p>
+      </div>
+    `,
+  );
+}
+
 export async function sendPasswordResetEmail(to: string, token: string): Promise<void> {
   const resetUrl = `${APP_URL}/reset-password/${token}`;
   await send(

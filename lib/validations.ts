@@ -3,6 +3,19 @@ import { CURRENCIES } from "@/lib/currencies";
 
 const SUBDOMAIN_REGEX = /^[a-z0-9](?:[a-z0-9-]{0,28}[a-z0-9])?$/;
 
+// Shared strength bar for every place a password gets *set* (signup,
+// reset) — not LoginSchema, which only checks "did they type something"
+// against whatever's already stored. `label` lets each call site's
+// messages read naturally ("La contraseña..." vs "La nueva contraseña...").
+function passwordField(label: string) {
+  return z
+    .string()
+    .min(8, `${label} debe tener al menos 8 caracteres`)
+    .regex(/[A-Z]/, `${label} debe incluir al menos una mayúscula`)
+    .regex(/[a-z]/, `${label} debe incluir al menos una minúscula`)
+    .regex(/[0-9]/, `${label} debe incluir al menos un número`);
+}
+
 export const SubdomainSchema = z
   .string()
   .trim()
@@ -15,7 +28,7 @@ export const SignupSchema = z.object({
   businessName: z.string().trim().min(1, "El nombre del negocio es obligatorio"),
   subdomain: SubdomainSchema,
   email: z.string().trim().toLowerCase().email("Correo inválido"),
-  password: z.string().min(8, "La contraseña debe tener al menos 8 caracteres"),
+  password: passwordField("La contraseña"),
 });
 
 export const LoginSchema = z.object({
@@ -34,7 +47,7 @@ export const AnnouncementSchema = z.object({
 
 export const ResetPasswordSchema = z
   .object({
-    password: z.string().min(8, "La contraseña debe tener al menos 8 caracteres"),
+    password: passwordField("La contraseña"),
     confirmPassword: z.string().min(1, "Confirma la nueva contraseña"),
   })
   .refine((data) => data.password === data.confirmPassword, {
@@ -234,6 +247,9 @@ export const PlatformSettingsSchema = z.object({
   paymentInstructions: z.preprocess(blankToUndefined, z.string().trim().optional()),
   binanceQrDataUrl: z.preprocess(blankToUndefined, z.string().trim().optional()),
   binanceId: z.preprocess(blankToUndefined, z.string().trim().optional()),
+  pagoMovilBank: z.preprocess(blankToUndefined, z.string().trim().optional()),
+  pagoMovilPhone: z.preprocess(blankToUndefined, z.string().trim().optional()),
+  pagoMovilId: z.preprocess(blankToUndefined, z.string().trim().optional()),
   defaultMonthlyFee: z.preprocess(
     blankToUndefined,
     z.coerce.number().positive("El monto debe ser mayor a 0").transform(toCents).optional()

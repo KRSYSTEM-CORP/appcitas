@@ -5,9 +5,11 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { hashPassword, verifyPassword } from "@/lib/password";
 import { setSessionCookie, clearSessionCookie } from "@/lib/session";
-import { sendPasswordResetEmail } from "@/lib/email";
+import { sendPasswordResetEmail, sendVerificationEmail } from "@/lib/email";
 import { createBusinessWithOwner } from "@/lib/business-provisioning";
 import { checkRateLimit, recordFailedAttempt, clearAttempts, rateLimitMessage } from "@/lib/rate-limit";
+import { getClientIp } from "@/lib/request-ip";
+import { verifyTurnstileToken } from "@/lib/turnstile";
 import {
   LoginSchema,
   RequestPasswordResetSchema,
@@ -17,20 +19,30 @@ import {
 import type { ActionResult } from "@/lib/types";
 
 const RESET_TOKEN_TTL_MS = 60 * 60 * 1000;
+const VERIFICATION_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 const LOGIN_MAX_ATTEMPTS = 8;
 const RESET_REQUEST_WINDOW_MS = 60 * 60 * 1000;
 const RESET_REQUEST_MAX_ATTEMPTS = 3;
 
-function hashResetToken(token: string): string {
+function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
 
 // Self-serve: the business is active immediately, with a free trial (see
 // createBusinessWithOwner/lib/billing.ts) — no super admin approval step.
-// Auto-logs in and lands straight on /settings, the same way the Google
+// Auto-logs in and lands straight on /agenda, the same way the Google
 // signup path (app/api/auth/google/callback) does.
 export async function signup(formData: FormData): Promise<ActionResult> {
+  const ip = await getClientIp();
+  const rl = await checkRateLimit("signup", ip, 5, 60 * 60_000);
+  if (!rl.allowed) return { success: false, error: rateLimitMessage(rl.retryAfterMinutes) };
+  await recordFailedAttempt("signup", ip);
+
+  const turnstileToken = formData.get("cf-turnstile-response");
+  const turnstileOk = await verifyTurnstileToken(typeof turnstileToken === "string" ? turnstileToken : "", ip);
+  if (!turnstileOk) return { success: false, error: "No pudimos verificar que eres humano. Intenta de nuevo." };
+
   const parsed = SignupSchema.safeParse({
     businessName: formData.get("businessName"),
     subdomain: formData.get("subdomain"),
@@ -62,8 +74,40 @@ export async function signup(formData: FormData): Promise<ActionResult> {
     subdomain,
   );
 
+  const rawToken = randomBytes(32).toString("hex");
+  await prisma.emailVerificationToken.create({
+    data: {
+      userId: user.id,
+      tokenHash: hashToken(rawToken),
+      expiresAt: new Date(Date.now() + VERIFICATION_TOKEN_TTL_MS),
+    },
+  });
+  await sendVerificationEmail(email, rawToken);
+
   await setSessionCookie({ uid: user.id, bid: business.id, businessName: business.name });
-  redirect("/settings");
+  redirect("/agenda");
+}
+
+// Confirms the address behind a token from sendVerificationEmail — called
+// directly (server-to-server, no client form) from
+// app/(app)/verify-email/[token]/page.tsx. Not a login gate today: the
+// account already works right after signup, this just records that the
+// address was real.
+export async function verifyEmail(token: string): Promise<ActionResult> {
+  const genericError = "Este enlace no es válido o ya venció.";
+  const verificationToken = await prisma.emailVerificationToken.findUnique({
+    where: { tokenHash: hashToken(token) },
+  });
+  if (!verificationToken || verificationToken.usedAt || verificationToken.expiresAt < new Date()) {
+    return { success: false, error: genericError };
+  }
+
+  await prisma.$transaction([
+    prisma.user.update({ where: { id: verificationToken.userId }, data: { emailVerified: true } }),
+    prisma.emailVerificationToken.update({ where: { id: verificationToken.id }, data: { usedAt: new Date() } }),
+  ]);
+
+  return { success: true };
 }
 
 export async function login(formData: FormData): Promise<ActionResult> {
@@ -149,7 +193,7 @@ export async function requestPasswordReset(formData: FormData): Promise<ActionRe
     await prisma.passwordResetToken.create({
       data: {
         userId: user.id,
-        tokenHash: hashResetToken(rawToken),
+        tokenHash: hashToken(rawToken),
         expiresAt: new Date(Date.now() + RESET_TOKEN_TTL_MS),
       },
     });
@@ -170,7 +214,7 @@ export async function resetPassword(token: string, formData: FormData): Promise<
 
   const genericError = "Este enlace no es válido o ya venció. Solicita uno nuevo.";
   const resetToken = await prisma.passwordResetToken.findUnique({
-    where: { tokenHash: hashResetToken(token) },
+    where: { tokenHash: hashToken(token) },
   });
   if (!resetToken || resetToken.usedAt || resetToken.expiresAt < new Date()) {
     return { success: false, error: genericError };

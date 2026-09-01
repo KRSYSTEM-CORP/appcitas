@@ -102,7 +102,7 @@ export async function GET(request: NextRequest) {
   });
 
   await setSessionCookie({ uid: user.id, bid: business.id, businessName: business.name });
-  const response = NextResponse.redirect(new URL("/settings", request.url));
+  const response = NextResponse.redirect(new URL("/agenda", request.url));
   response.cookies.delete("google_oauth_state");
   return response;
 }

@@ -30,6 +30,9 @@ export type BillingInfo = {
   paymentInstructions: string | null;
   binanceQrDataUrl: string | null;
   binanceId: string | null;
+  pagoMovilBank: string | null;
+  pagoMovilPhone: string | null;
+  pagoMovilId: string | null;
 };
 
 export async function getBillingInfo(): Promise<BillingInfo> {
@@ -63,6 +66,9 @@ export async function getBillingInfo(): Promise<BillingInfo> {
     paymentInstructions: settings?.paymentInstructions ?? null,
     binanceQrDataUrl: settings?.binanceQrDataUrl ?? null,
     binanceId: settings?.binanceId ?? null,
+    pagoMovilBank: settings?.pagoMovilBank ?? null,
+    pagoMovilPhone: settings?.pagoMovilPhone ?? null,
+    pagoMovilId: settings?.pagoMovilId ?? null,
   };
 }
 

@@ -3,6 +3,7 @@ import { NavBar } from "@/components/nav/NavBar";
 import { getSession } from "@/lib/session";
 import { getBranding } from "@/lib/actions/business";
 import { deriveBrandVars } from "@/lib/theme-color";
+import { KrCitasTour } from "@/components/onboarding/KrCitasTour";
 
 export async function generateMetadata(): Promise<Metadata> {
   const session = await getSession();
@@ -26,6 +27,7 @@ export default async function AppLayout({ children }: Readonly<{ children: React
           isSuperAdmin={session.isSuperAdmin}
         />
       )}
+      {session && <KrCitasTour hasSeenTour={session.hasSeenTour} />}
       <main className="flex-1 min-h-0">{children}</main>
     </div>
   );

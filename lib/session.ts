@@ -40,6 +40,10 @@ export type Session = {
   monthlyFeeUsdCents: number | null;
   localCurrencyCode: string;
   nextPaymentDueDate: Date | null;
+  // Gates the first-time product tour (components/onboarding/ProductTour.tsx)
+  // — false only for a brand-new signup that hasn't clicked through or
+  // skipped it yet.
+  hasSeenTour: boolean;
 };
 
 export async function getSession(): Promise<Session | null> {
@@ -84,6 +88,7 @@ export async function getSession(): Promise<Session | null> {
     monthlyFeeUsdCents: user.business.monthlyFeeUsdCents,
     localCurrencyCode: user.business.localCurrencyCode,
     nextPaymentDueDate,
+    hasSeenTour: user.hasSeenTour,
   };
 }
 

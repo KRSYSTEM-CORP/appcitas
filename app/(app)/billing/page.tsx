@@ -102,7 +102,7 @@ export default async function BillingPage() {
           </div>
 
           <div className="rounded-md border border-border bg-card p-4 flex flex-col gap-2">
-            <h2 className="text-sm font-semibold">Cómo pagar — Pago Móvil</h2>
+            <h2 className="text-sm font-semibold">Pago Móvil</h2>
             {info.monthlyFeeLocalAmount != null && (
               <p className="text-sm">
                 <span className="text-muted-foreground">Monto a pagar: </span>

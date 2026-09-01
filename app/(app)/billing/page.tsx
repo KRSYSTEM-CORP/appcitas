@@ -1,6 +1,7 @@
 import { PaymentReportForm } from "@/components/billing/PaymentReportForm";
 import { getBillingInfo, listMyPaymentReports } from "@/lib/actions/billing";
-import { formatDate, formatMoney, PAYMENT_METHOD_LABELS } from "@/lib/format";
+import { formatDate, formatMoney, formatUSDT, PAYMENT_METHOD_LABELS } from "@/lib/format";
+import { formatLocalCurrency } from "@/lib/currencies";
 import { WHATSAPP_PHONE } from "@/lib/legal";
 import type { PaymentReportStatus } from "@prisma/client";
 
@@ -67,6 +68,12 @@ export default async function BillingPage() {
 
           <div className="rounded-md border border-border bg-card p-4 flex flex-col gap-3">
             <h2 className="text-sm font-semibold">Cómo pagar — Binance (USDT)</h2>
+            {info.monthlyFeeUsdCents != null && (
+              <p className="text-sm">
+                <span className="text-muted-foreground">Monto a pagar: </span>
+                <span className="font-medium">{formatUSDT(info.monthlyFeeUsdCents)}</span>
+              </p>
+            )}
             {info.binanceQrDataUrl || info.binanceId ? (
               <>
                 {info.binanceQrDataUrl && (
@@ -96,6 +103,14 @@ export default async function BillingPage() {
 
           <div className="rounded-md border border-border bg-card p-4 flex flex-col gap-2">
             <h2 className="text-sm font-semibold">Cómo pagar — Pago Móvil</h2>
+            {info.monthlyFeeLocalAmount != null && (
+              <p className="text-sm">
+                <span className="text-muted-foreground">Monto a pagar: </span>
+                <span className="font-medium">
+                  {formatLocalCurrency(info.monthlyFeeLocalAmount, info.localCurrencyCode)}
+                </span>
+              </p>
+            )}
             {info.pagoMovilBank || info.pagoMovilPhone || info.pagoMovilId ? (
               <>
                 {info.pagoMovilBank && (
@@ -117,7 +132,9 @@ export default async function BillingPage() {
                   </p>
                 )}
                 <p className="text-xs text-muted-foreground">
-                  Paga el equivalente en bolívares a la tasa del día.
+                  {info.monthlyFeeLocalAmount != null
+                    ? "Este monto cambia a diario según tu tasa de cambio configurada."
+                    : "Paga el equivalente en bolívares a la tasa del día."}
                 </p>
               </>
             ) : (
@@ -150,7 +167,11 @@ export default async function BillingPage() {
               Enviar comprobante por WhatsApp →
             </a>
           </div>
-          <PaymentReportForm />
+          <PaymentReportForm
+            monthlyFeeUsdCents={info.monthlyFeeUsdCents}
+            monthlyFeeLocalAmount={info.monthlyFeeLocalAmount}
+            localCurrencyCode={info.localCurrencyCode}
+          />
         </div>
       )}
 

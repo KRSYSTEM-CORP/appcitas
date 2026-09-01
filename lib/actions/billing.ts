@@ -25,6 +25,13 @@ export type BillingInfo = {
   // The business' own retail currency (Settings → Moneda) — informational,
   // unrelated to platform billing (which is always USDT via Binance now).
   localCurrencyCode: string;
+  // monthlyFeeUsdCents converted to localCurrencyCode at the business' own
+  // exchange rate (Configuración → Tasa de cambio) — null unless that rate
+  // is enabled and denominated in USD, since the subscription itself is
+  // USD-denominated (converting through a foreign-currency-≠-USD rate would
+  // be wrong). Recomputed on every page load, so it tracks the rate's daily
+  // updates automatically instead of being stored anywhere.
+  monthlyFeeLocalAmount: number | null;
   nextPaymentDueDate: Date | null;
   blocked: boolean;
   paymentInstructions: string | null;
@@ -47,6 +54,9 @@ export async function getBillingInfo(): Promise<BillingInfo> {
           monthlyFeeUsdCents: true,
           nextPaymentDueDate: true,
           localCurrencyCode: true,
+          exchangeRate: true,
+          fxEnabled: true,
+          foreignCurrencyCode: true,
         },
       }),
       tx.platformSettings.findUnique({ where: { id: PLATFORM_SETTINGS_ID } }),
@@ -56,11 +66,19 @@ export async function getBillingInfo(): Promise<BillingInfo> {
   const isExempt = business?.isExempt ?? false;
   const nextPaymentDueDate = business?.nextPaymentDueDate ?? null;
 
+  const rate = business?.exchangeRate != null ? Number(business.exchangeRate) : null;
+  const monthlyFeeUsdCents = business?.monthlyFeeUsdCents ?? null;
+  const monthlyFeeLocalAmount =
+    business?.fxEnabled && business.foreignCurrencyCode === "USD" && rate != null && monthlyFeeUsdCents != null
+      ? (monthlyFeeUsdCents / 100) * rate
+      : null;
+
   return {
     businessName,
     isExempt,
-    monthlyFeeUsdCents: business?.monthlyFeeUsdCents ?? null,
+    monthlyFeeUsdCents,
     localCurrencyCode: business?.localCurrencyCode ?? "VES",
+    monthlyFeeLocalAmount,
     nextPaymentDueDate,
     blocked: isBusinessBlocked({ isExempt, nextPaymentDueDate }),
     paymentInstructions: settings?.paymentInstructions ?? null,

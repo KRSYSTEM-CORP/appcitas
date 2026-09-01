@@ -36,6 +36,18 @@ export function formatMoney(cents: number, currencyCode: string): string {
   }
 }
 
+// Binance Pay settles in USDT, not USD — same 1:1 amount as formatMoney(...,
+// "USD"), but labeled the way the subscription's Binance card/report
+// actually asks for it (see app/(app)/billing/page.tsx and
+// components/billing/PaymentReportForm.tsx).
+export function formatUSDT(cents: number): string {
+  const amount = new Intl.NumberFormat("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(cents / 100);
+  return `${amount} USDT`;
+}
+
 export function formatDuration(minutes: number): string {
   if (minutes < 60) return `${minutes} min`;
   const hours = Math.floor(minutes / 60);

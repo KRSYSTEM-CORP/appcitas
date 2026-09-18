@@ -660,5 +660,17 @@ model PlatformSettings {
   // approves a new signup and leaves the fee field blank (see approveBusiness
   // in lib/actions/admin.ts).
   defaultMonthlyFeeUsdCents Int?
+  // Bolívares per 1 USD, used only to show the subscription's Bs-equivalent
+  // price for Pago Móvil (see getPlatformExchangeRateInfo, lib/actions/
+  // billing.ts) — the subscription itself is always billed in USD/USDT, so
+  // this is deliberately independent of any one business' own Business.
+  // exchangeRate (which might be disabled, foreign-currency-≠-USD, or just
+  // wrong for this purpose). Self-heals the same way a business' own rate
+  // does: refreshed once a day by the cron at app/api/cron/bcv-rate/
+  // route.ts, plus a stale check on read — a super admin can also type one
+  // in directly or force a BCV refresh from /admin, same UX as a business'
+  // own rate in Settings.
+  platformExchangeRate          Decimal?  @db.Decimal(12, 4)
+  platformExchangeRateUpdatedAt DateTime?
   updatedAt                 DateTime @updatedAt
 }

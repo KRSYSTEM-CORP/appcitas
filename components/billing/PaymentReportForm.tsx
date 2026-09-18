@@ -22,11 +22,9 @@ type ReportLine = { paymentMethod: PaymentMethod; amount: string; reference: str
 export function PaymentReportForm({
   monthlyFeeUsdCents,
   monthlyFeeLocalAmount,
-  localCurrencyCode,
 }: {
   monthlyFeeUsdCents: number | null;
   monthlyFeeLocalAmount: number | null;
-  localCurrencyCode: string;
 }) {
   const [isPending, startTransition] = useTransition();
   const router = useRouter();
@@ -124,8 +122,8 @@ export function PaymentReportForm({
           )}
           {line.paymentMethod === "PAGO_MOVIL" && monthlyFeeLocalAmount != null && (
             <p className="text-xs text-muted-foreground">
-              Monto de la suscripción: {formatLocalCurrency(monthlyFeeLocalAmount, localCurrencyCode)} (a tu tasa
-              actual) — ingresa su equivalente en USD arriba.
+              Monto de la suscripción: {formatLocalCurrency(monthlyFeeLocalAmount, "VES")} (tasa BCV) —
+              ingresa su equivalente en USD arriba.
             </p>
           )}
         </div>

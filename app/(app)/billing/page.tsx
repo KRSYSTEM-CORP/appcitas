@@ -107,7 +107,7 @@ export default async function BillingPage() {
               <p className="text-sm">
                 <span className="text-muted-foreground">Monto a pagar: </span>
                 <span className="font-medium">
-                  {formatLocalCurrency(info.monthlyFeeLocalAmount, info.localCurrencyCode)}
+                  {formatLocalCurrency(info.monthlyFeeLocalAmount, "VES")}
                 </span>
               </p>
             )}
@@ -133,7 +133,7 @@ export default async function BillingPage() {
                 )}
                 <p className="text-xs text-muted-foreground">
                   {info.monthlyFeeLocalAmount != null
-                    ? "Este monto cambia a diario según tu tasa de cambio configurada."
+                    ? "Este monto se actualiza a diario según la tasa BCV de KR System."
                     : "Paga el equivalente en bolívares a la tasa del día."}
                 </p>
               </>
@@ -170,7 +170,6 @@ export default async function BillingPage() {
           <PaymentReportForm
             monthlyFeeUsdCents={info.monthlyFeeUsdCents}
             monthlyFeeLocalAmount={info.monthlyFeeLocalAmount}
-            localCurrencyCode={info.localCurrencyCode}
           />
         </div>
       )}

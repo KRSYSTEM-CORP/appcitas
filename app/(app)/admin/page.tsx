@@ -1,20 +1,22 @@
 import { StatCard } from "@/components/reports/StatCard";
 import { AdminBusinessTable } from "@/components/admin/AdminBusinessTable";
 import { AnnouncementForm } from "@/components/admin/AnnouncementForm";
-import { PlatformSettingsForm, PendingReportsTable } from "@/components/admin/PaymentReportsPanel";
+import { PlatformSettingsForm, PlatformExchangeRateForm, PendingReportsTable } from "@/components/admin/PaymentReportsPanel";
 import {
   listBusinessesForAdmin,
   listAnnouncementRecipients,
   listPendingPaymentReports,
   getPlatformSettings,
 } from "@/lib/actions/admin";
+import { getPlatformExchangeRateInfo } from "@/lib/actions/billing";
 
 export default async function AdminPage() {
-  const [businesses, announcementRecipients, pendingReports, platformSettings] = await Promise.all([
+  const [businesses, announcementRecipients, pendingReports, platformSettings, platformExchangeRate] = await Promise.all([
     listBusinessesForAdmin(),
     listAnnouncementRecipients(),
     listPendingPaymentReports(),
     getPlatformSettings(),
+    getPlatformExchangeRateInfo(),
   ]);
   const pending = businesses.filter((b) => b.ownerStatus === "PENDING").length;
   const active = businesses.filter((b) => b.ownerStatus === "ACTIVE").length;
@@ -45,6 +47,10 @@ export default async function AdminPage() {
           initialPagoMovilPhone={platformSettings.pagoMovilPhone}
           initialPagoMovilId={platformSettings.pagoMovilId}
           initialDefaultMonthlyFeeUsdCents={platformSettings.defaultMonthlyFeeUsdCents}
+        />
+        <PlatformExchangeRateForm
+          currentRate={platformExchangeRate.rate}
+          currentUpdatedAt={platformExchangeRate.updatedAt}
         />
       </div>
 

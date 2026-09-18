@@ -9,7 +9,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { formatDate, formatMoney, PAYMENT_METHOD_LABELS } from "@/lib/format";
 import { resizeImageToDataUrl } from "@/lib/image-utils";
-import { approvePaymentReport, rejectPaymentReport, updatePlatformSettings } from "@/lib/actions/admin";
+import {
+  approvePaymentReport,
+  rejectPaymentReport,
+  updatePlatformSettings,
+  updatePlatformExchangeRate,
+  fetchAndUpdatePlatformBcvRate,
+} from "@/lib/actions/admin";
 
 type PendingReportLine = {
   paymentMethod: PaymentMethod;
@@ -216,6 +222,79 @@ export function PlatformSettingsForm({
         Guardar
       </Button>
     </form>
+  );
+}
+
+// KR System's own USD/Bs rate — independent of any one business' rate,
+// used only to price the subscription's Pago Móvil amount in Bolívares
+// (see getPlatformExchangeRateInfo, lib/actions/billing.ts). Same
+// manual-input + BCV-refresh-button pair a business gets in its own
+// Settings → Tasa de cambio, just for this platform-wide rate instead.
+export function PlatformExchangeRateForm({
+  currentRate,
+  currentUpdatedAt,
+}: {
+  currentRate: number | null;
+  currentUpdatedAt: Date | null;
+}) {
+  const router = useRouter();
+  const [error, setError] = useState<string | null>(null);
+  const [isSaving, startSaveTransition] = useTransition();
+  const [isFetching, startFetchTransition] = useTransition();
+
+  function handleSubmit(formData: FormData) {
+    setError(null);
+    startSaveTransition(async () => {
+      const result = await updatePlatformExchangeRate(formData);
+      if (result.success) router.refresh();
+      else setError(result.error);
+    });
+  }
+
+  function handleFetchBcv() {
+    setError(null);
+    startFetchTransition(async () => {
+      const result = await fetchAndUpdatePlatformBcvRate();
+      if (result.success) router.refresh();
+      else setError(result.error);
+    });
+  }
+
+  return (
+    <div className="flex flex-col gap-3 rounded-lg border p-3">
+      <div>
+        <Label className="text-sm font-medium">Tasa de cambio de la suscripción</Label>
+        <p className="text-xs text-muted-foreground">
+          Convierte el precio mensual (USD) a bolívares para Pago Móvil. Se actualiza sola todos los
+          días con la tasa del BCV — este botón es solo para no esperar a la actualización de hoy.
+        </p>
+      </div>
+      <form action={handleSubmit} className="flex items-end gap-2 flex-wrap">
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="platform-rate">Bs por 1 USD</Label>
+          <Input
+            id="platform-rate"
+            name="rate"
+            type="number"
+            min={0}
+            step="0.0001"
+            defaultValue={currentRate ?? ""}
+            required
+            className="w-40"
+          />
+        </div>
+        <Button type="submit" size="sm" disabled={isSaving}>
+          {isSaving ? "Guardando..." : "Actualizar tasa"}
+        </Button>
+        <Button type="button" size="sm" variant="outline" onClick={handleFetchBcv} disabled={isFetching}>
+          {isFetching ? "Consultando BCV..." : "Actualizar con BCV"}
+        </Button>
+      </form>
+      {currentUpdatedAt && (
+        <p className="text-xs text-muted-foreground">Última actualización: {formatDate(currentUpdatedAt)}</p>
+      )}
+      {error && <p className="text-sm text-destructive">{error}</p>}
+    </div>
   );
 }
 

@@ -4,6 +4,8 @@ import { revalidatePath } from "next/cache";
 import { withSuperAdmin } from "@/lib/tenant-db";
 import { requireSuperAdmin } from "@/lib/session";
 import { sendAnnouncementEmail } from "@/lib/email";
+import { fetchBcvRate } from "@/lib/bcv-rate";
+import { invalidateCache } from "@/lib/cache";
 import {
   PLATFORM_SETTINGS_ID,
   TRIAL_DAYS,
@@ -16,6 +18,7 @@ import {
   MaintenancePaymentSchema,
   RejectPaymentReportSchema,
   PlatformSettingsSchema,
+  ExchangeRateSchema,
 } from "@/lib/validations";
 import type { ActionResult } from "@/lib/types";
 
@@ -408,6 +411,59 @@ export async function updatePlatformSettings(input: unknown): Promise<ActionResu
     })
   );
 
+  revalidatePath("/admin");
+  revalidatePath("/billing");
+  return { success: true };
+}
+
+// Manual override for KR System's own USD/Bs rate (see
+// getPlatformExchangeRateInfo, lib/actions/billing.ts) — same schema and
+// pattern as a business' own updateExchangeRate in lib/actions/settings.ts,
+// just writing PlatformSettings instead of one Business.
+export async function updatePlatformExchangeRate(formData: FormData): Promise<ActionResult> {
+  await requireSuperAdmin();
+  const parsed = ExchangeRateSchema.safeParse({ rate: formData.get("rate") });
+  if (!parsed.success) {
+    return { success: false, error: parsed.error.issues[0]?.message ?? "Tasa inválida" };
+  }
+
+  await withSuperAdmin((tx) =>
+    tx.platformSettings.upsert({
+      where: { id: PLATFORM_SETTINGS_ID },
+      create: { id: PLATFORM_SETTINGS_ID, platformExchangeRate: parsed.data.rate, platformExchangeRateUpdatedAt: new Date() },
+      update: { platformExchangeRate: parsed.data.rate, platformExchangeRateUpdatedAt: new Date() },
+    })
+  );
+
+  await invalidateCache("platformExchangeRateInfo");
+  revalidatePath("/admin");
+  revalidatePath("/billing");
+  return { success: true };
+}
+
+// Manual on-demand refresh — the same rate also gets pulled automatically
+// once a day by app/api/cron/bcv-rate/route.ts, so this button is only for
+// "I don't want to wait for tonight's run" (mirrors fetchAndUpdateBcvRate in
+// lib/actions/settings.ts).
+export async function fetchAndUpdatePlatformBcvRate(): Promise<ActionResult> {
+  await requireSuperAdmin();
+
+  let rate: number;
+  try {
+    rate = await fetchBcvRate("USD");
+  } catch {
+    return { success: false, error: "No se pudo consultar la tasa del BCV. Intenta de nuevo." };
+  }
+
+  await withSuperAdmin((tx) =>
+    tx.platformSettings.upsert({
+      where: { id: PLATFORM_SETTINGS_ID },
+      create: { id: PLATFORM_SETTINGS_ID, platformExchangeRate: rate, platformExchangeRateUpdatedAt: new Date() },
+      update: { platformExchangeRate: rate, platformExchangeRateUpdatedAt: new Date() },
+    })
+  );
+
+  await invalidateCache("platformExchangeRateInfo");
   revalidatePath("/admin");
   revalidatePath("/billing");
   return { success: true };

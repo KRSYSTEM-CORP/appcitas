@@ -72,6 +72,11 @@ export type BillingInfo = {
   // first load). Recomputed on every page load, so it tracks the rate's
   // daily updates automatically instead of being stored anywhere.
   monthlyFeeLocalAmount: number | null;
+  // The raw Bs-per-USD rate itself (same source as monthlyFeeLocalAmount) —
+  // exposed so PaymentReportForm can convert a Pago Móvil line the business
+  // types directly in Bolívares back to the USD amount the schema expects,
+  // instead of asking them to do that math themselves.
+  platformRate: number | null;
   nextPaymentDueDate: Date | null;
   blocked: boolean;
   paymentInstructions: string | null;
@@ -110,6 +115,7 @@ export async function getBillingInfo(): Promise<BillingInfo> {
     isExempt,
     monthlyFeeUsdCents,
     monthlyFeeLocalAmount,
+    platformRate: platformRate.rate,
     nextPaymentDueDate,
     blocked: isBusinessBlocked({ isExempt, nextPaymentDueDate }),
     paymentInstructions: settings?.paymentInstructions ?? null,

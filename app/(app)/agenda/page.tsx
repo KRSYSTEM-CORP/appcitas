@@ -2,9 +2,11 @@ import Link from "next/link";
 import { buttonVariants } from "@/components/ui/button";
 import { AppointmentCard } from "@/components/agenda/AppointmentCard";
 import { AgendaLiveRefresh } from "@/components/agenda/AgendaLiveRefresh";
+import { AgendaSnapshotSync } from "@/components/agenda/AgendaSnapshotSync";
 import { DayTimeline } from "@/components/agenda/DayTimeline";
 import { listAppointmentsInRange } from "@/lib/actions/appointments";
 import { listActiveSpecialists } from "@/lib/actions/specialists";
+import { listActiveServices } from "@/lib/actions/services";
 import { getFxInfo, getBusinessHourForWeekday } from "@/lib/actions/business";
 import { requireSession } from "@/lib/session";
 import { formatDate, formatDayLabel } from "@/lib/format";
@@ -32,10 +34,18 @@ export default async function AgendaPage({
 
   const { start, end } = getRange(view, dateKey);
   const dayWeekday = weekdayOf(dateKey);
+  // Always literally "today" (Caracas wall-clock), independent of whatever
+  // date/view is currently being browsed — feeds the offline snapshot (see
+  // AgendaSnapshotSync below) so it never freezes on a past/future day the
+  // owner happened to be looking at right before losing connectivity.
+  const { start: todayStart, end: todayEnd } = getRange("day", todayDateKey());
+  const isViewingToday = view === "day" && dateKey === todayDateKey();
 
-  const [appointments, specialists, fx, dayHours] = await Promise.all([
+  const [appointments, todayAppointments, specialists, services, fx, dayHours] = await Promise.all([
     listAppointmentsInRange(start, end),
+    isViewingToday ? Promise.resolve(null) : listAppointmentsInRange(todayStart, todayEnd),
     listActiveSpecialists(),
+    listActiveServices(),
     getFxInfo(),
     view === "day" ? getBusinessHourForWeekday(dayWeekday) : Promise.resolve(null),
   ]);
@@ -52,6 +62,17 @@ export default async function AgendaPage({
   return (
     <div className="flex flex-col gap-4 p-6 w-full">
       <AgendaLiveRefresh businessId={session.businessId} />
+      <AgendaSnapshotSync
+        businessId={session.businessId}
+        businessName={session.businessName}
+        specialists={specialists}
+        services={services}
+        todayAppointments={todayAppointments ?? appointments}
+        localCurrencyCode={fx.localCurrencyCode}
+        fxEnabled={fx.fxEnabled}
+        foreignCurrencyCode={fx.foreignCurrencyCode}
+        rate={fx.rate}
+      />
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-semibold">Agenda de {session.businessName}</h1>

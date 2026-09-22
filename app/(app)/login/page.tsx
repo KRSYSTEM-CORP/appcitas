@@ -2,6 +2,7 @@ import { LoginForm } from "@/components/auth/LoginForm";
 import { WelcomeModal } from "@/components/auth/WelcomeModal";
 import { TrialBadge } from "@/components/auth/TrialBadge";
 import { SiteFooter } from "@/components/layout/SiteFooter";
+import { InstallAppButton } from "@/components/nav/InstallAppButton";
 import { WHATSAPP_URL } from "@/lib/legal";
 import { googleOAuthConfigured } from "@/lib/google-oauth";
 
@@ -25,6 +26,11 @@ export default async function LoginPage({
             <h1 className="text-2xl font-semibold">Inicia sesión</h1>
             <p className="text-sm text-muted-foreground mt-1">KR Citas — agenda y reservas</p>
           </div>
+          {/* Only offered here, before signing in — once inside the app the
+              nav no longer shows it (see components/nav/NavBar.tsx). Renders
+              nothing on its own if the browser hasn't fired
+              beforeinstallprompt (e.g. Safari, or already installed). */}
+          <InstallAppButton />
         </div>
         <LoginForm googleConfigured={googleOAuthConfigured()} authError={error} />
         <p className="text-center text-sm text-muted-foreground">

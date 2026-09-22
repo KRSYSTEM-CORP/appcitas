@@ -8,6 +8,7 @@ const TABS = [
   { href: "/settings/branding", label: "Marca" },
   { href: "/settings/hours", label: "Horario" },
   { href: "/settings/currency", label: "Multidivisa" },
+  { href: "/settings/install", label: "Instalar app" },
 ];
 
 export function SettingsTabs() {

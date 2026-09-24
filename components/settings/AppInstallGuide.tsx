@@ -31,7 +31,7 @@ export function AppInstallGuide() {
           El botón para instalarla aparece en la pantalla de inicio de sesión, antes de entrar —
           si no lo viste ahí, instálala desde el navegador: en <strong>Chrome o Edge</strong>, el
           icono de instalar en la barra de direcciones (o menú → «Instalar KR Citas»); en{" "}
-          <strong>Safari (Mac)</strong>, Compartir → «Añadir al Dock».
+          <strong>Safari en Mac</strong>, Compartir → «Añadir al Dock»; en <strong>Safari en iPhone/iPad</strong>, Compartir → «Añadir a pantalla de inicio» (es siempre manual en iPhone, Apple no permite instalar con un botón).
         </p>
       )}
     </div>
